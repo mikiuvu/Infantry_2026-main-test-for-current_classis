@@ -18,8 +18,8 @@
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
 //#define ONE_BOARD // 单板控制整车
-//#define CHASSIS_BOARD //底盘板
-#define GIMBAL_BOARD  //云台板
+#define CHASSIS_BOARD //底盘板
+//#define GIMBAL_BOARD  //云台板
 // #define BALANCE_BOARD //启用平衡底盘,则默认双板且当前板位底盘,目前不支持!请勿使用!
 
 // 视觉通信协议选择,只能开一个
@@ -94,8 +94,8 @@
 /* ======================== 底盘IMU配置 ======================== */
 // IMU安装位置偏移 (相对于底盘几何中心, 单位mm)
 // 正方向: X轴指向机器人前方, Y轴指向机器人左侧
-#define CHASSIS_IMU_OFFSET_X     0.0f   // IMU相对底盘中心的X偏移 (mm), 正值表示IMU在前
-#define CHASSIS_IMU_OFFSET_Y     0.0f   // IMU相对底盘中心的Y偏移 (mm), 正值表示IMU在左
+#define CHASSIS_IMU_OFFSET_X     -185.0f   // IMU相对底盘中心的X偏移 (mm), 正值表示IMU在前
+#define CHASSIS_IMU_OFFSET_Y     4.1f   // IMU相对底盘中心的Y偏移 (mm), 正值表示IMU在左
 
 /* ======================== IMU安装方向校正 ======================== */
 // 使用ins_task中的IMU_Param_Correction进行方向校正
@@ -270,10 +270,10 @@ typedef enum
 typedef struct
 {
     // 控制部分
-    float vx;           // 前进方向速度
-    float vy;           // 横移方向速度
-    float wz;           // 旋转速度
-    float offset_angle; // 底盘和归中位置的夹角
+    float vx;           // 前进方向速度, 单位: degree/s (电机转子角速度)
+    float vy;           // 横移方向速度, 单位: degree/s (电机转子角速度)
+    float wz;           // 旋转速度, 单位: degree/s
+    float offset_angle; // 底盘和归中位置的夹角, 单位: degree
     chassis_mode_e chassis_mode;
     float chassis_power_buff;
     dash_mode_e dash_mode; // 冲刺模式
@@ -328,10 +328,10 @@ typedef struct
 #if defined(CHASSIS_BOARD) || defined(GIMBAL_BOARD) // 非单板的时候底盘还将imu数据回传(若有必要)
     attitude_t chassis_imu_data;
 #endif
-    // 后续增加底盘的真实速度
+    // 底盘真实速度 (用于速度融合和打滑检测), 单位: mm/s (轮子线速度)
      float real_vx;
      float real_vy;
-     float real_wz;
+     float real_wz;  // 单位: degree/s
 
     uint8_t rest_heat;           // 剩余枪口热量
     float bullet_speed;          // 实时弹速

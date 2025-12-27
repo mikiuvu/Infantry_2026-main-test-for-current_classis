@@ -19,7 +19,7 @@
 #include "bsp_rng.h"
 #include "bsp_dwt.h"
 #include "controller.h"
-#include "bsp_vofa.h"  // VOFA+数据发送模块
+#include "bsp_vofa.h" 
 
 /* ===================== 一维卡尔曼滤波器  ===================== */
 typedef struct {
@@ -95,8 +95,8 @@ static SlipControl_t slip_ctrl = {0};
 // 打滑检测参数 (混合控制模式)
 #define SLIP_SPEED_THRESHOLD     300.0f  // 速度偏差阈值 (mm/s)
 #define SLIP_DEVIATION_RATIO     0.2f    // 偏差比例阈值 (30%)
-#define TCS_MIN_FACTOR           0.1f    // TCS最小输出系数
-#define TCS_RECOVERY_RATE        0.01f   // TCS恢复速率 (每周期)
+#define TCS_MIN_FACTOR           0.0f    // TCS最小输出系数
+#define TCS_RECOVERY_RATE        0.05f   // TCS恢复速率 (每周期)
 
 // 单轮打滑检测参数
 #define WHEEL_SLIP_THRESHOLD     200.0f  // 单轮速度偏差阈值 (mm/s)
@@ -159,8 +159,8 @@ static float chassis_CURRENT_PID[3]={0.5,0,0};
 // static float t;
 
 /* 私有函数计算的中介变量,设为静态避免参数传递的开销 */
-static float chassis_vx, chassis_vy;     // 将云台系的速度投影到底盘
-static float vt_lf, vt_rf, vt_lb, vt_rb; // 混合控制: 各轮目标速度
+static float chassis_vx, chassis_vy;     // 将云台系的速度投影到底盘, 单位: degree/s (电机转子角速度)
+static float vt_lf, vt_rf, vt_lb, vt_rb; // 混合控制: 各轮目标速度, 单位: degree/s (电机转子角速度)
 
 static float rotate_speed_buff = 0;
 void ChassisInit()
@@ -177,7 +177,7 @@ void ChassisInit()
                 .Kd = 0.0f,
                 .IntegralLimit = 3000,
                 .Improve = PID_Integral_Limit,
-                .MaxOut = 10000,
+                .MaxOut = 15000,
             },
             // 电流环 (内环)
             .current_PID = {
@@ -225,7 +225,7 @@ void ChassisInit()
     chassis_motor_config.controller_param_init_config.current_feedforward_ptr = &current_ff_rb;
     motor_rb = DJIMotorInit(&chassis_motor_config);
 
-    // Chassis_motor(motor_lf, motor_lb, motor_rf, motor_rb); // 同步电机实例
+    Chassis_motor(motor_lf, motor_lb, motor_rf, motor_rb); // 同步电机实例
 
     // 裁判系统初始化 - 如果没有连接裁判系统可以注释掉
     // 注意: 如果注释掉,需要在LimitChassisOutput()中处理referee_data的空指针问题
@@ -247,8 +247,8 @@ void ChassisInit()
     Chassis_INS_data = INS_GetDataPtr(); // 获取完整IMU数据指针（包含MotionAccel_b）
     
     // 初始化速度融合卡尔曼滤波器 (混合控制参数)
-    SimpleKalman1D_Init(&kf_vx, 0.1f, 0.5f, 0.0f);
-    SimpleKalman1D_Init(&kf_vy, 0.1f, 0.5f, 0.0f);
+    SimpleKalman1D_Init(&kf_vx, 0.1f, 0.8f, 0.0f);
+    SimpleKalman1D_Init(&kf_vy, 0.1f, 0.8f, 0.0f);
     
     // 初始化全局观测器PID (输出为补偿力)
     // 这个PID用于：融合速度误差 -> 补偿力矩
@@ -313,10 +313,11 @@ void ChassisInit()
 
 /**
  * @brief 计算各轮目标速度 (麦轮/全向轮逆运动学)
+ * @note 输入输出单位均为 degree/s (电机转子角速度)
  */
 static void MecanumCalculate()
 {
-    // X型全向轮逆运动学: 底盘速度 -> 各轮速度
+    // X型全向轮逆运动学: 底盘速度 -> 各轮速度 (单位: degree/s)
     vt_lf = (-chassis_vx - chassis_vy) / Sqrt(2) + chassis_cmd_recv.wz * CENTER2;
     vt_rf = (chassis_vx - chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER1;
     vt_lb = (-chassis_vx + chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER3;
@@ -430,16 +431,17 @@ static void LimitChassisOutput()
 /**
  * @brief 速度估计与打滑检测 (混合控制模式)
  *        使用轮速与融合速度的偏差来检测打滑
+ * @note 内部计算使用 mm/s (轮子线速度) 进行融合和打滑检测
  */
 static void EstimateSpeed()
 {
-    // 获取四个轮子的线速度 (mm/s)
+    // 获取四个轮子的线速度: 电机角速度(degree/s) -> 轮子线速度(mm/s)
     float wheel_lf = motor_lf->measure.speed_aps * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
     float wheel_rf = motor_rf->measure.speed_aps * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
     float wheel_lb = motor_lb->measure.speed_aps * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
     float wheel_rb = motor_rb->measure.speed_aps * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
     
-    // 逆运动学: 轮速 -> 底盘速度
+    // 正运动学: 轮速(mm/s) -> 底盘速度(mm/s), 用于速度融合和打滑检测
     float wheel_vx = (-wheel_lf + wheel_rf - wheel_lb + wheel_rb) / (2.0f * Sqrt(2));
     float wheel_vy = (-wheel_lf - wheel_rf + wheel_lb + wheel_rb) / (2.0f * Sqrt(2));
     
@@ -521,11 +523,11 @@ static void EstimateSpeed()
     // 如果某个轮子偏差大，则认为该轮打滑
     
     // 使用融合速度和IMU角速度计算期望轮速 (逆运动学)
-    float real_vx = chassis_feedback_data.real_vx;
-    float real_vy = chassis_feedback_data.real_vy;
-    float real_wz = omega_yaw;  // 使用IMU角速度而不是轮速计算的
+    float real_vx = chassis_feedback_data.real_vx;  // 融合速度 (mm/s)
+    float real_vy = chassis_feedback_data.real_vy;  // 融合速度 (mm/s)
+    float real_wz = omega_yaw;  // 使用IMU角速度而不是轮速计算的 (rad/s)
     
-    // 期望轮速计算 (X型全向轮逆运动学) - 单位: mm/s
+    // 期望轮速计算 (X型全向轮逆运动学) - 单位: mm/s (轮子线速度)
     float expected_lf = (-real_vx - real_vy) / Sqrt(2) + real_wz * L;
     float expected_rf = (real_vx - real_vy) / Sqrt(2) - real_wz * L;
     float expected_lb = (-real_vx + real_vy) / Sqrt(2) - real_wz * L;
@@ -588,7 +590,8 @@ static void EstimateSpeed()
     // CH0-1: IMU开环积分速度, CH2-3: 轮速, CH4-5: 融合速度, CH6-7: 加速度
     VOFA(imu_raw_vx, imu_raw_vy, wheel_vx, wheel_vy,
          chassis_feedback_data.real_vx, chassis_feedback_data.real_vy, 
-         imu_accel_x, imu_accel_y);
+         imu_accel_x, imu_accel_y,slip_ctrl.wheel[0].tcs_factor,slip_ctrl.wheel[1].tcs_factor
+        ,slip_ctrl.wheel[2].tcs_factor,slip_ctrl.wheel[3].tcs_factor);
     
     // 底盘整体打滑判断: 绝对偏差阈值 或 相对偏差阈值 或 任一轮打滑
     uint8_t abs_slip = (slip_ctrl.speed_deviation > SLIP_SPEED_THRESHOLD);
@@ -608,7 +611,7 @@ static void EstimateSpeed()
         // 根据打滑轮数量调整卡尔曼R值
         // 打滑轮越多，轮速整体可信度越低
         // 1轮: R=1.0, 2轮: R=1.5, 3轮: R=2.0, 4轮: R=3.0
-        float slip_R = 0.5f + 0.5f * slip_wheel_count;
+        float slip_R = 0.8f + 0.7f * slip_wheel_count;
         if (slip_wheel_count >= 3) slip_R = 2.0f + (slip_wheel_count - 2);
         kf_vx.R = slip_R;
         kf_vy.R = slip_R;
@@ -624,8 +627,8 @@ static void EstimateSpeed()
         }
         
         // 恢复正常卡尔曼R
-        kf_vx.R = 0.5f;
-        kf_vy.R = 0.5f;
+        kf_vx.R = 0.8f;
+        kf_vy.R = 0.8f;
     }
 #else
     chassis_feedback_data.real_vx = wheel_vx;

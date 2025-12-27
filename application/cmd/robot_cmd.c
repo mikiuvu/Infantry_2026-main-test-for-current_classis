@@ -404,8 +404,10 @@ static void RemoteControlSet()
     }
 
     // 底盘参数,目前没有加入小陀螺(调试似乎暂时没有必要),系数需要调整
-    chassis_cmd_send.vx = 30.0f * (float)rc_data[TEMP].rc.rocker_r_; // _水平方向 80
-    chassis_cmd_send.vy = 30.0f * (float)rc_data[TEMP].rc.rocker_r1; // 1数值方向 80
+    // 单位: degree/s (电机转子角速度), 摇杆范围±660, 系数×660=满杆转速
+    // M3508最高约54000 degree/s, 45×660≈29700, 留有余量
+    chassis_cmd_send.vx = 45.0f * (float)rc_data[TEMP].rc.rocker_r_; // degree/s
+    chassis_cmd_send.vy = 45.0f * (float)rc_data[TEMP].rc.rocker_r1; // degree/s
     chassis_cmd_send.dash_mode = DASH_OFF;
     //chassis_cmd_send.wz=5.0f*(float)rc_data[TEMP].rc.rocker_l_;
     
@@ -519,11 +521,13 @@ static void MouseKeySet()
     }
     **/
     Limitshoot();
-    chassis_speed_buff = 20000;
+    // 单位: degree/s (电机转子角速度)
+    // 30000 degree/s ≈ 2500 mm/s 轮速, M3508最高约54000 degree/s
+    chassis_speed_buff = 30000;
     chassis_cmd_send.chassis_power_buff = 1;
     gimbal_cmd_send.gimbal_mode = GIMBAL_FREE_MODE;
-    chassis_cmd_send.vy = rc_data[TEMP].key[KEY_PRESS].w * chassis_speed_buff - rc_data[TEMP].key[KEY_PRESS].s * chassis_speed_buff; // 系数待测
-    chassis_cmd_send.vx = rc_data[TEMP].key[KEY_PRESS].a * chassis_speed_buff - rc_data[TEMP].key[KEY_PRESS].d * chassis_speed_buff;
+    chassis_cmd_send.vy = rc_data[TEMP].key[KEY_PRESS].w * chassis_speed_buff - rc_data[TEMP].key[KEY_PRESS].s * chassis_speed_buff; // degree/s
+    chassis_cmd_send.vx = rc_data[TEMP].key[KEY_PRESS].a * chassis_speed_buff - rc_data[TEMP].key[KEY_PRESS].d * chassis_speed_buff; // degree/s
     switch (rc_data[TEMP].key[KEY_PRESS].x) // X键刷新UI
     {
     case 1:
