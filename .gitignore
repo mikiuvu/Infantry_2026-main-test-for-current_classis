@@ -1,0 +1,70 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+<<<<<<< HEAD
+=======
+*.lib
+*.a
+>>>>>>> 1612caec95a67d4c8cd4944ae9be51928619e4fc
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+<<<<<<< HEAD
+=======
+*.hex
+>>>>>>> 1612caec95a67d4c8cd4944ae9be51928619e4fc
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+<<<<<<< HEAD
+build
+./idea
+.vscode/.cortex-debug.peripherals.state.json
+.vscode/.cortex-debug.registers.state.json
+*.jdebug*
+settings.json
+=======
+>>>>>>> 1612caec95a67d4c8cd4944ae9be51928619e4fc
+
+# YoYo AI version control directory
+.yoyo/
