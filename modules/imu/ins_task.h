@@ -28,8 +28,7 @@
 typedef struct
 {
     float Gyro[3];  // 角速度
-    float Accel[3]; // 加速度 (含重力)
-    float MotionAccel_b[3]; // 运动加速度 (已去重力, 机体系)
+    float Accel[3]; // 加速度
     // 还需要增加角速度数据
     float Roll;
     float Pitch;
@@ -43,7 +42,10 @@ typedef struct
 {
     float q[4]; // 四元数估计值
 
-    float MotionAccel_n[3]; // 绝对系加速度 
+    float MotionAccel_b[3]; // 机体坐标加速度
+    float MotionAccel_n[3]; // 绝对系加速度
+
+    float GyroAlpha[3];     // 角加速度 (rad/s^2) - 已滤波
 
     float AccelLPF; // 加速度低通滤波系数
 
@@ -56,10 +58,9 @@ typedef struct
     // float atanxz;
     // float atanyz;
 
-    // IMU量测值 (以下字段需与attitude_t布局一致!)
+    // IMU量测值
     float Gyro[3];  // 角速度
-    float Accel[3]; // 加速度 
-    float MotionAccel_b[3]; // 运动加速度 (已去重力, 机体系)
+    float Accel[3]; // 加速度
     // 位姿
     float Roll;
     float Pitch;
@@ -85,6 +86,13 @@ typedef struct
  *
  */
 attitude_t *INS_Init(void);
+
+/**
+ * @brief 获取完整的INS数据结构体指针
+ *        包含MotionAccel_b等高级数据
+ * @return INS_t* INS数据结构体指针
+ */
+INS_t *INS_GetDataPtr(void);
 
 /**
  * @brief 此函数放入实时系统中,以1kHz频率运行

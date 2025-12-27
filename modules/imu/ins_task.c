@@ -112,9 +112,16 @@ attitude_t *INS_Init(void)
 
     // noise of accel is relatively big and of high freq,thus lpf is used
     INS.AccelLPF = 0.0085;
-    
     DWT_GetDeltaT64(&INS_DWT_Count);
     return (attitude_t *)&INS.Gyro; // @todo: 这里偷懒了,不要这样做! 修改INT_t结构体可能会导致异常,待修复.
+}
+
+/**
+ * @brief 获取完整的INS数据结构体指针
+ */
+INS_t *INS_GetDataPtr(void)
+{
+    return &INS;
 }
 
 /* 注意以1kHz的频率运行此任务 */
@@ -134,6 +141,18 @@ void INS_Task(void)
         INS.Accel[X] = BMI088.Accel[X];
         INS.Accel[Y] = BMI088.Accel[Y];
         INS.Accel[Z] = BMI088.Accel[Z];
+        
+        // 计算角加速度 (rad/s^2) - 使用一阶差分 + 低通滤波
+        static float gyro_last[3] = {0};
+        #define GYRO_ALPHA_LPF 0.02f  // 角加速度低通滤波系数
+        for (uint8_t i = 0; i < 3; ++i)
+        {
+            float alpha_raw = (BMI088.Gyro[i] - gyro_last[i]) / dt;
+            // 低通滤波平滑角加速度
+            INS.GyroAlpha[i] = alpha_raw * dt / (GYRO_ALPHA_LPF + dt) + INS.GyroAlpha[i] * GYRO_ALPHA_LPF / (GYRO_ALPHA_LPF + dt);
+            gyro_last[i] = BMI088.Gyro[i];
+        }
+        
         INS.Gyro[X] = BMI088.Gyro[X];
         INS.Gyro[Y] = BMI088.Gyro[Y];
         INS.Gyro[Z] = BMI088.Gyro[Z];
