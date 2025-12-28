@@ -124,6 +124,7 @@ bsp/rng/bsp_rng.c \
 bsp/vofa/bsp_vofa.c \
 modules/algorithm/controller.c \
 modules/algorithm/kalman_filter.c \
+modules/algorithm/simple_kalman.c \
 modules/algorithm/QuaternionEKF.c \
 modules/algorithm/crc8.c \
 modules/algorithm/crc16.c \

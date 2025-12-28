@@ -128,7 +128,7 @@ INS_t *INS_GetDataPtr(void)
 void INS_Task(void)
 {
     static uint32_t count = 0;
-    const float gravity[3] = {0, 0, 9.81f};
+    const float gravity[3] = {0, 0, 9.7916f};
 
     dt = DWT_GetDeltaT(&INS_DWT_Count);
     t += dt;

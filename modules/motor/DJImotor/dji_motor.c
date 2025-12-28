@@ -345,14 +345,14 @@ void DJIMotorControl()
         else
         {
             static float result_1, result_2;
-            result_1 = (-b + Sqrt(b * b - 4 * a * c))/(2*a);
-            result_2 = (-b - Sqrt(b * b - 4 * a * c))/(2*a);
+            result_1 = (-b + Sqrt(b * b - 4 * a * c)) / (2 * a);
+            result_2 = (-b - Sqrt(b * b - 4 * a * c)) / (2 * a);
             if ((result_1 > 1 || result_1 < 0) && (result_2 > 1 || result_2 < 0))
                 for (int i = 0; i < 4; i++)
                     chassismotor[i]->real_output = 0;
             else if (result_1 > 0 && result_1 < 1 && result_2 > 0 && result_2 < 1)
                 for (int i = 0; i < 4; i++)
-                    chassismotor[i]->real_output =chassismotor[i]->measure.target_current * ((result_1 > result_2) ? result_1 : result_2);
+                    chassismotor[i]->real_output = chassismotor[i]->measure.target_current * ((result_1 > result_2) ? result_1 : result_2);
             else
                 for (int i = 0; i < 4; i++)
                     chassismotor[i]->real_output = chassismotor[i]->measure.target_current * ((result_1 > 0 && result_1 < 1) ? result_1 : result_2);
@@ -371,10 +371,10 @@ void DJIMotorControl()
         if (sender_enable_flag[i])
         {
             if (!CANTransmit(&sender_assignment[i], 1))
-        {
-            // 发送失败，下次再试
-            // 避免持续堵塞
-        } 
+            {
+                // 发送失败，下次再试
+                // 避免持续堵塞
+            }
         }
     }
 }
