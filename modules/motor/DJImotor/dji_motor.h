@@ -24,6 +24,7 @@
 #include "robot_def.h"
 
 #define DJI_MOTOR_CNT 12
+#define POWER_LIMIT_3508_CNT 4  // 底盘3508电机数量
 
 /* 滤波系数设置为1的时候即关闭滤波 */
 #define SPEED_SMOOTH_COEF 0.85f      // 最好大于0.85
@@ -47,10 +48,8 @@ typedef struct
     int16_t real_current;     // 实际电流
     uint8_t temperate;        // 温度 Celsius
 
-    float target_omega;       //目标转速
-    float estimate_power;     //单个电机估计功率
+    float predicted_power;    //预测功率(用于功率限制)
     float target_current;     //目标电流，用于记录中间量，从而功率规划
-    float Power_Factor;       //电流削减参数
     float total_angle;   // 总角度,注意方向
     int32_t total_round; // 总圈数,注意方向
 } DJI_Motor_Measure_s;
@@ -75,14 +74,6 @@ typedef struct
     Motor_Working_Type_e stop_flag; // 启停标志
     float real_output;
 } DJIMotorInstance;
-
-typedef struct
-{
-    DJIMotorInstance *motor_lf;
-    DJIMotorInstance *motor_lb;
-    DJIMotorInstance *motor_rf;
-    DJIMotorInstance *motor_rb;
-}chassis_motors;
 
 /**
  * @brief 调用此函数注册一个DJI智能电机,需要传递较多的初始化参数,请在application初始化的时候调用此函数
@@ -165,5 +156,18 @@ void DJIMotorSetFeedfoward(DJIMotorInstance *motor, Feedfoward_Type_e feedfoward
  *
  */
 void ChassisPowerSet(float power);
+
+/**
+ * @brief 注册需要进行功率限制的电机
+ * @param motor 电机实例指针
+ * @param motor_type 电机类型(M3508)
+ */
+void DJIMotorSetPowerLimitMotors(DJIMotorInstance *motor, Motor_Type_e motor_type);
+
+/**
+ * @brief 获取当前功率限制系数
+ * @return float 限制系数(0~1)
+ */
+float DJIMotorGetPowerLimitCoef(void);
 
 #endif // !DJI_MOTOR_H

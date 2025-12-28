@@ -113,29 +113,159 @@ static void MotorSenderGrouping(DJIMotorInstance *motor, CAN_Init_Config_s *conf
     }
 }
 
-DJIMotorInstance *chassismotor[4];
+/* ========================= 功率控制相关变量 ========================= */
+// 底盘电机指针数组(用于功率限制)
+static DJIMotorInstance *dji_motor_powerLimit_3508[POWER_LIMIT_3508_CNT] = {NULL};
+static uint8_t idx_powerLimit_3508 = 0;
+
+// 功率限制参数
+static float Chassis_Power_Max = 30.0f;  // 底盘功率上限(W),应从裁判系统获取
+static float limit_coef = 1.0f;          // 电流衰减系数(0~1)
+static float total_predicted_power = 0;  // 总预测功率
+
+/**
+ * @brief 注册底盘电机用于功率限制
+ * @param motor_lf 左前电机
+ * @param motor_lb 左后电机
+ * @param motor_rf 右前电机
+ * @param motor_rb 右后电机
+ */
 void Chassis_motor(DJIMotorInstance *motor_lf, DJIMotorInstance *motor_lb, DJIMotorInstance *motor_rf, DJIMotorInstance *motor_rb)
 {
-    chassismotor[0] = motor_lf;
-    chassismotor[1] = motor_lb;
-    chassismotor[2] = motor_rf;
-    chassismotor[3] = motor_rb;
+    DJIMotorSetPowerLimitMotors(motor_lf, M3508);
+    DJIMotorSetPowerLimitMotors(motor_lb, M3508);
+    DJIMotorSetPowerLimitMotors(motor_rf, M3508);
+    DJIMotorSetPowerLimitMotors(motor_rb, M3508);
 }
-float consume_power, available_power;
-float Estimate_ChassisPower, Chassis_Power_Max = 30;
-static void New_PowerFactor()
+
+/**
+ * @brief 注册需要进行功率限制的电机
+ * @param motor 电机实例指针
+ * @param motor_type 电机类型
+ */
+void DJIMotorSetPowerLimitMotors(DJIMotorInstance *motor, Motor_Type_e motor_type)
 {
-    // Chassis_Power_Max = 30;              // referee_data->GameRobotState.chassis_power_limit;
-    available_power = Chassis_Power_Max; //+ PIDCalculate(&Power_PID, cap->cap_msg.Now_Power, Chassis_Power_Max);
-    consume_power = 0;
-    for (int i = 0; i < 4; i++)
-        consume_power += chassismotor[i]->measure.estimate_power;
-    if (consume_power <= available_power)
-        for (int i = 0; i < 4; i++)
-            chassismotor[i]->measure.Power_Factor = 1.0f;
+    if (motor == NULL) return;
+    
+    if (motor_type == M3508 && idx_powerLimit_3508 < POWER_LIMIT_3508_CNT)
+    {
+        // 检查是否已注册
+        for (uint8_t i = 0; i < idx_powerLimit_3508; i++)
+        {
+            if (dji_motor_powerLimit_3508[i] == motor) return;
+        }
+        dji_motor_powerLimit_3508[idx_powerLimit_3508++] = motor;
+    }
+}
+
+/**
+ * @brief 功率预测函数 - 根据电流和转速预测单个电机功率
+ * @param motor 电机实例指针
+ * @note 使用6参数模型: P = K0 + K1*I + K2*ω + K3*I*ω + K4*I² + K5*ω²
+ */
+static void DJIMotorPowerPredict(DJIMotorInstance *motor)
+{
+    if (motor == NULL) return;
+    
+    // 电流转换: real_current是原始值,需要转换为安培
+    // M3508: real_current * 20 / 16384 = 实际电流(A)
+    float current = motor->measure.real_current * 20.0f / 16384.0f;
+    float speed = motor->measure.speed_aps * DEGREE_2_RAD;  // 转为弧度每秒
+    
+    // 使用绝对值,功率与方向无关
+    float abs_speed = (speed > 0) ? speed : -speed;
+    
+    motor->measure.predicted_power = k0 + k1 * current + k2 * abs_speed 
+                                   + k3 * current * abs_speed 
+                                   + k4 * current * current 
+                                   + k5 * abs_speed * abs_speed;
+}
+
+/**
+ * @brief 功率限制函数 - 计算电流衰减系数
+ * @note 当预测总功率超过限制时,通过求解二次方程得到衰减系数
+ *       二次方程: a*x² + b*x + c = 0, 其中x为电流衰减系数
+ */
+static void DJIMotorPowerLimit(void)
+{
+    total_predicted_power = 0;
+    
+    // 1. 计算所有电机的预测功率
+    for (uint8_t i = 0; i < POWER_LIMIT_3508_CNT; i++)
+    {
+        if (dji_motor_powerLimit_3508[i] != NULL)
+        {
+            DJIMotorPowerPredict(dji_motor_powerLimit_3508[i]);
+            total_predicted_power += dji_motor_powerLimit_3508[i]->measure.predicted_power;
+        }
+    }
+    
+    // 2. 判断是否超功率
+    if (total_predicted_power <= Chassis_Power_Max)
+    {
+        limit_coef = 1.0f;  // 未超功率,不限制
+        return;
+    }
+    
+    // 3. 超功率,求解衰减系数
+    // 建立二次方程: Σ(K0 + K1*I*x + K2*ω + K3*I*x*ω + K4*(I*x)² + K5*ω²) = P_max
+    // 整理为: a*x² + b*x + c = 0
+    float a = 0, b = 0, c = 0;
+    
+    for (uint8_t i = 0; i < POWER_LIMIT_3508_CNT; i++)
+    {
+        if (dji_motor_powerLimit_3508[i] != NULL)
+        {
+            float current = dji_motor_powerLimit_3508[i]->measure.real_current * 20.0f / 16384.0f;
+            float speed = dji_motor_powerLimit_3508[i]->measure.speed_aps * DEGREE_2_RAD;
+            float abs_speed = (speed > 0) ? speed : -speed;
+            
+            // a = Σ K4 * I²
+            a += k4 * current * current;
+            // b = Σ (K1*I + K3*I*ω)
+            b += k1 * current + k3 * current * abs_speed;
+            // c = Σ (K0 + K2*ω + K5*ω²)
+            c += k0 + k2 * abs_speed + k5 * abs_speed * abs_speed;
+        }
+    }
+    
+    // c需要减去目标功率
+    c -= Chassis_Power_Max;
+    
+    // 4. 求解二次方程
+    float delta = b * b - 4 * a * c;
+    
+    if (delta < 0)
+    {
+        // 无解,直接置零(极端情况)
+        limit_coef = 0;
+        return;
+    }
+    
+    float sqrt_delta = Sqrt(delta);
+    float x1 = (-b + sqrt_delta) / (2 * a);
+    float x2 = (-b - sqrt_delta) / (2 * a);
+    
+    // 选择在(0,1)区间内的解
+    if((x1 > 0 && x1 < 1) || (x2 > 0 && x2 < 1))
+        {
+            // 取有效解（优先取较大的，减少性能损失）
+            limit_coef = (x1 > 0 && x1 < 1) ? x1 : x2;
+        }
     else
-        for (int i = 0; i < 4; i++)
-            chassismotor[i]->measure.Power_Factor = 0;
+    {
+        // 两个解都不在有效区间,置零
+        limit_coef = 0;
+    }
+}
+
+/**
+ * @brief 获取当前功率限制系数
+ * @return float 限制系数(0~1)
+ */
+float DJIMotorGetPowerLimitCoef(void)
+{
+    return limit_coef;
 }
 
 /**
@@ -188,9 +318,6 @@ DJIMotorInstance *DJIMotorInit(Motor_Init_Config_s *config)
     // 后续增加电机前馈控制器(速度和电流)
     instance->motor_controller.speed_foward_ptr = config->controller_param_init_config.speed_feedforward_ptr;
     instance->motor_controller.current_foward_ptr = config->controller_param_init_config.current_feedforward_ptr;
-
-    // 功率控制初始化，防止出现云台电机不响应
-    instance->measure.Power_Factor = 1.0f;
 
     // 电机分组,因为至多4个电机可以共用一帧CAN控制报文
     MotorSenderGrouping(instance, &config->can_init_config);
@@ -315,7 +442,6 @@ void DJIMotorControl()
         group = motor->sender_group;
         num = motor->message_num;
         motor->measure.target_current = set;
-        measure->estimate_power = k0 + k1 * (measure->target_current * 20 / 16384) + k2 * (measure->speed_aps * DEGREE_2_RAD) + k3 * (measure->target_current * 20 / 16384) * (measure->speed_aps * DEGREE_2_RAD) + k4 * (measure->target_current * 20 / 16384) * (measure->target_current * 20 / 16384) + k5 * (measure->speed_aps * DEGREE_2_RAD) * (measure->speed_aps * DEGREE_2_RAD);
         sender_assignment[group].tx_buff[2 * num] = (uint8_t)((int16_t)motor->measure.target_current >> 8);         // 低八位
         sender_assignment[group].tx_buff[2 * num + 1] = (uint8_t)((int16_t)motor->measure.target_current & 0x00ff); // 高八位
 
@@ -324,43 +450,32 @@ void DJIMotorControl()
         { // 若该电机处于停止状态,直接将buff置零
             memset(sender_assignment[group].tx_buff + 2 * num, 0, 16u);
             motor->real_output = motor->measure.target_current = 0;
-            motor->measure.estimate_power = k0 + k1 * (measure->target_current * 20 / 16384) + k2 * (measure->speed_aps * DEGREE_2_RAD) + k3 * (measure->target_current * 20 / 16384) * (measure->speed_aps * DEGREE_2_RAD) + k4 * (measure->target_current * 20 / 16384) * (measure->target_current * 20 / 16384) + k5 * (measure->speed_aps * DEGREE_2_RAD) * (measure->speed_aps * DEGREE_2_RAD);
         }
     }
-    // New_PowerFactor();
+    
+    // ==================== 功率限制处理 ====================
 #ifdef CHASSIS_BOARD
-    if (chassismotor[0]->measure.Power_Factor != 1.0f)
+    // 计算功率限制系数
+    DJIMotorPowerLimit();
+    
+    // 如果需要限制功率(limit_coef < 1),则对底盘电机电流进行衰减
+    if (limit_coef < 1.0f)
     {
-        float a = 0, b = 0, c = 0;
-        for (int i = 0; i < 4; i++)
+        for (uint8_t i = 0; i < POWER_LIMIT_3508_CNT; i++)
         {
-            a += k4 * POW_2(chassismotor[i]->measure.target_current * 20 / 16384);
-            b += chassismotor[i]->measure.target_current * 20 / 16384 * (k1 + k3 * chassismotor[i]->measure.speed_aps * DEGREE_2_RAD);
-            c += k0 + k2 * chassismotor[i]->measure.speed_aps * DEGREE_2_RAD + k5 * POW_2(chassismotor[i]->measure.speed_aps * DEGREE_2_RAD);
-        }
-        c -= available_power;
-        if (b * b - 4 * a * c < 0) // b^2-4ac<0则方程无解
-            for (int i = 0; i < 4; i++)
-                chassismotor[i]->real_output = 0;
-        else
-        {
-            static float result_1, result_2;
-            result_1 = (-b + Sqrt(b * b - 4 * a * c)) / (2 * a);
-            result_2 = (-b - Sqrt(b * b - 4 * a * c)) / (2 * a);
-            if ((result_1 > 1 || result_1 < 0) && (result_2 > 1 || result_2 < 0))
-                for (int i = 0; i < 4; i++)
-                    chassismotor[i]->real_output = 0;
-            else if (result_1 > 0 && result_1 < 1 && result_2 > 0 && result_2 < 1)
-                for (int i = 0; i < 4; i++)
-                    chassismotor[i]->real_output = chassismotor[i]->measure.target_current * ((result_1 > result_2) ? result_1 : result_2);
-            else
-                for (int i = 0; i < 4; i++)
-                    chassismotor[i]->real_output = chassismotor[i]->measure.target_current * ((result_1 > 0 && result_1 < 1) ? result_1 : result_2);
-        }
-        for (int i = 0; i < 4; i++)
-        {
-            sender_assignment[chassismotor[i]->sender_group].tx_buff[2 * chassismotor[i]->message_num] = (uint8_t)(((int16_t)chassismotor[i]->real_output) >> 8);         // 低八位
-            sender_assignment[chassismotor[i]->sender_group].tx_buff[2 * chassismotor[i]->message_num + 1] = (uint8_t)(((int16_t)chassismotor[i]->real_output) & 0x00ff); // 高八位
+            if (dji_motor_powerLimit_3508[i] != NULL)
+            {
+                DJIMotorInstance *chassis_motor = dji_motor_powerLimit_3508[i];
+                
+                // 应用衰减系数
+                chassis_motor->real_output = (int16_t)(chassis_motor->measure.target_current * limit_coef);
+                
+                // 更新发送缓冲区
+                uint8_t grp = chassis_motor->sender_group;
+                uint8_t msg_num = chassis_motor->message_num;
+                sender_assignment[grp].tx_buff[2 * msg_num] = (uint8_t)(((int16_t)chassis_motor->real_output) >> 8);
+                sender_assignment[grp].tx_buff[2 * msg_num + 1] = (uint8_t)(((int16_t)chassis_motor->real_output) & 0x00ff);
+            }
         }
     }
 #endif
