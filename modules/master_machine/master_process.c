@@ -104,13 +104,13 @@ static void DecodeVision()
 {
     uint16_t flag_register; // 标志位寄存器,存储各种状态和模式
     
-    DaemonReload(vision_daemon_instance); // 喂狗 - 重置看门狗计数,表明通信正常
+    DaemonReload(vision_daemon_instance); // 喂狗 - 
     
     // 从串口接收缓冲区解析数据
     // 参数: 接收缓冲区, 标志位指针, 数据起始地址(pitch角度)
     get_protocol_info(vision_usart_instance->recv_buff, &flag_register, (uint8_t *)&recv_data.pitch);
     
-    recv_data.pitch *= (-1); // pitch角度取反,可能是坐标系转换需要
+    recv_data.pitch *= (-1); // 
     
     // 解析标志位寄存器中的各个字段
     recv_data.fire_mode = ((flag_register & 0xf000) >> 12);  // 提取bit[15:12]: 开火模式

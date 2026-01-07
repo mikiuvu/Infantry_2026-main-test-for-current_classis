@@ -440,26 +440,33 @@ static void RemoteControlSet()
 
     if (switch_is_mid(rc_data[TEMP].rc.switch_left))
     {
+        shoot_cmd_send.friction_mode = FRICTION_ON;  // 摩擦轮常开
+         if (rc_data[TEMP].rc.dial < -300)
+                shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
+        else if (rc_data[TEMP].rc.dial > 300)
+                shoot_cmd_send.load_mode = LOAD_1_BULLET;
+        else
+                shoot_cmd_send.load_mode = LOAD_STOP;
         // ======================== 根据协议类型获取视觉发射指令 ========================
         // 只有跟踪和开火标志位都为1时才开启摩擦轮，并允许通过拨轮控制拨弹盘
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        // VCP/UART协议: 跟踪(tracking==1)且开火(fire==1)时才允许开火
-        if (vision_recv_data->tracking == 1 && vision_recv_data->fire == 1)
-        {
-            shoot_cmd_send.friction_mode = FRICTION_ON;  // 摩擦轮常开
-            // 通过拨轮控制拨弹盘: 拨轮向上(<-300)连发, 向下(>300)单发
-            if (rc_data[TEMP].rc.dial < -300)
-                shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-            else if (rc_data[TEMP].rc.dial > 300)
-                shoot_cmd_send.load_mode = LOAD_1_BULLET;
-            else
-                shoot_cmd_send.load_mode = LOAD_STOP;
-        }
-        else
-        {
-            shoot_cmd_send.friction_mode = FRICTION_OFF;
-            shoot_cmd_send.load_mode = LOAD_STOP;
-        }
+        // // VCP/UART协议: 跟踪(tracking==1)且开火(fire==1)时才允许开火
+        // if (vision_recv_data->tracking == 1 && vision_recv_data->fire == 1)
+        // {
+        //     shoot_cmd_send.friction_mode = FRICTION_ON;  // 摩擦轮常开
+        //     // 通过拨轮控制拨弹盘: 拨轮向上(<-300)连发, 向下(>300)单发
+        //     if (rc_data[TEMP].rc.dial < -300)
+        //         shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
+        //     else if (rc_data[TEMP].rc.dial > 300)
+        //         shoot_cmd_send.load_mode = LOAD_1_BULLET;
+        //     else
+        //         shoot_cmd_send.load_mode = LOAD_STOP;
+        // }
+        // else
+        // {
+        //     shoot_cmd_send.friction_mode = FRICTION_OFF;
+        //     shoot_cmd_send.load_mode = LOAD_STOP;
+        // }
 #elif defined(VISION_USE_SERIALPORT)
         // SerialPort协议: 使用shootStatus字段 (非0=跟踪且开火, 0=停火)
         if (vision_recv_data_sp->shootStatus != 0)
