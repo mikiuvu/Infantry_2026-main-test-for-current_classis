@@ -111,6 +111,7 @@ void ShootInit()
                 .Improve = PID_Integral_Limit | PID_Trapezoid_Intergral | PID_DerivativeFilter,
                 .IntegralLimit = 10000,
                 .MaxOut = 15000,
+                .DeadBand = 25,
             },
             .current_PID = {
                 .Kp = 1.5, //0.7
@@ -120,18 +121,16 @@ void ShootInit()
                 .IntegralLimit = 10000,
                 .MaxOut = 15000,
             },
-            
         },
         .controller_setting_init_config = {
             .angle_feedback_source = MOTOR_FEED,
             .speed_feedback_source = MOTOR_FEED,
-
             .outer_loop_type = SPEED_LOOP,
-            .close_loop_type = SPEED_LOOP | CURRENT_LOOP ,
+            .close_loop_type = SPEED_LOOP | CURRENT_LOOP,
             .motor_reverse_flag = MOTOR_DIRECTION_REVERSE,
-
         },
-        .motor_type = M3508};
+        .motor_type = M3508,
+    };
 
     Motor_Init_Config_s friction_config_l = {
         .can_init_config = {
@@ -147,6 +146,7 @@ void ShootInit()
                 .Improve = PID_Integral_Limit | PID_Trapezoid_Intergral | PID_DerivativeFilter,
                 .IntegralLimit = 10000,
                 .MaxOut = 15000,
+                .DeadBand = 25
             },
             .current_PID = {
                 .Kp = 1.5, //0.7
@@ -156,18 +156,16 @@ void ShootInit()
                 .IntegralLimit = 10000,
                 .MaxOut = 15000,
             },
-            
         },
         .controller_setting_init_config = {
             .angle_feedback_source = MOTOR_FEED,
             .speed_feedback_source = MOTOR_FEED,
-
             .outer_loop_type = SPEED_LOOP,
-            .close_loop_type = SPEED_LOOP | CURRENT_LOOP ,
+            .close_loop_type = SPEED_LOOP | CURRENT_LOOP,
             .motor_reverse_flag = MOTOR_DIRECTION_NORMAL,
-
         },
-        .motor_type = M3508};
+        .motor_type = M3508,
+    };
 
         friction_r = DJIMotorInit(&friction_config_r);
         friction_l = DJIMotorInit(&friction_config_l); 
@@ -182,7 +180,7 @@ void ShootInit()
             .angle_PID = {
                 // 如果启用位置环来控制发弹,需要较大的I值保证输出力矩的线性度否则出现接近拨出的力矩大幅下降
                 .Kp = 18, //10
-                .Ki = 0,
+                .Ki = 0.8,
                 .Kd = 0,
                 .MaxOut = 20000,
             },
@@ -196,7 +194,7 @@ void ShootInit()
             },
             .current_PID = {
                 .Kp = 1.5, //1.5
-                .Ki = 0,   //0
+                .Ki = 0.0,   //0
                 .Kd = 0,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 5000,

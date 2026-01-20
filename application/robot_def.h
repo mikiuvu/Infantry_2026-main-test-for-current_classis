@@ -72,11 +72,11 @@
 #define PITCH_KEY_MAX           12.0f   // 键盘模式pitch最大角度(°)
 
 // 拨盘堵转检测与反转参数
-#define BLOCK_DETECT_THRESHOLD 0.95f   // 堵转判定误差阈值(误差/目标值),越高越敏感
-#define BLOCK_DETECT_COUNT 500         // 堵转判定次数
-#define BLOCK_TIME_RECORD_COUNT 20     // 记录堵转时间戳的计数阈值，不建议修改
+#define BLOCK_DETECT_THRESHOLD 0.80f   // 堵转判定误差阈值(误差/目标值)
+#define BLOCK_DETECT_COUNT 200         // 堵转判定次数
+#define BLOCK_TIME_RECORD_COUNT 20     // 记录堵转时间戳的计数阈值，不建议修改 20
 #define REVERSE_DURATION_MS 500        // 反转持续时间(ms)
-#define REVERSE_ANGLE_RATIO 1.0f       // 反转角度系数，不建议修改
+#define REVERSE_ANGLE_RATIO 1.0f       // 反转角度系数，不建议修改 1.0
 
 // 发射参数
 #define ONE_BULLET_DELTA_ANGLE 45   // 发射一发弹丸拨盘转动的距离,由机械设计图纸给出

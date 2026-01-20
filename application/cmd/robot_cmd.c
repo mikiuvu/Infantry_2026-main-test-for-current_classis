@@ -151,10 +151,10 @@ static void Limitshoot()
     //     shoot_cmd_send.shoot_rate = 7;
     //     break;    
     // default:
-    //     shoot_cmd_send.shoot_rate = 5;//目前的调试数据
+    //     shoot_cmd_send.shoot_rate = 5;
     //     break;
     // }
-    shoot_cmd_send.shoot_rate = 7;
+    shoot_cmd_send.shoot_rate = 20;
 }
 #endif // DEBUG
 
