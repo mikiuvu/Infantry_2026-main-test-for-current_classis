@@ -413,16 +413,6 @@ static void RemoteControlSet()
     
     
     // 发射参数
-    /**
-    if (switch_is_up(rc_data[TEMP].rc.switch_right)) // 右侧开关状态[上],弹舱打开
-    {
-        shoot_cmd_send.lid_mode = LID_OPEN;
-    } // 弹舱舵机控制,待添加servo_motor模块,开启
-    else
-    {
-        shoot_cmd_send.lid_mode = LID_CLOSE;
-    } // 弹舱舵机控制,待添加servo_motor模块,关闭
-    **/
     // 摩擦轮控制,拨轮向上打为负,向下为正
     if (rc_data[TEMP].rc.dial < -100 ) // 向上超过100,打开摩擦轮
         shoot_cmd_send.friction_mode = FRICTION_ON;
@@ -430,7 +420,7 @@ static void RemoteControlSet()
         shoot_cmd_send.friction_mode = FRICTION_OFF;
     // 拨弹控制,遥控器固定为一种拨弹模式,可自行选择
     if (rc_data[TEMP].rc.dial < -300)
-        shoot_cmd_send.load_mode = LOAD_4_BULLET;
+        shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
     else if (rc_data[TEMP].rc.dial > 300)
         shoot_cmd_send.load_mode = LOAD_1_BULLET;
     else
