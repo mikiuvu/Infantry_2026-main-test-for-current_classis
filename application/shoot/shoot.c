@@ -281,8 +281,8 @@ void ShootTask()
         //     break;
         // } 
 
-        DJIMotorSetRef(friction_l, 45000);//40000
-        DJIMotorSetRef(friction_r, 45000);
+        DJIMotorSetRef(friction_l, 5000);//40000
+        DJIMotorSetRef(friction_r, 5000);
     }
     else // 关闭摩擦轮/
     {
