@@ -18,6 +18,7 @@
 
 #include "bsp_can.h"
 #include "controller.h"
+#include "daemon.h"
 #include "motor_def.h"
 #include "stdint.h"
 #include "user_lib.h"
@@ -66,6 +67,7 @@ typedef struct
     Motor_Controller_s motor_controller;    // 电机控制器
 
     CANInstance *motor_can_instance; // 电机CAN实例
+    DaemonInstance *motor_daemon;    // 电机离线检测 daemon
     // 分组发送设置
     uint8_t sender_group;
     uint8_t message_num;
@@ -169,5 +171,12 @@ void DJIMotorSetPowerLimitMotors(DJIMotorInstance *motor, Motor_Type_e motor_typ
  * @return float 限制系数(0~1)
  */
 float DJIMotorGetPowerLimitCoef(void);
+
+/**
+ * @brief 检查电机是否在线
+ * @param motor 电机实例指针
+ * @return uint8_t 1=在线, 0=离线
+ */
+uint8_t DJIMotorIsOnline(DJIMotorInstance *motor);
 
 #endif // !DJI_MOTOR_H

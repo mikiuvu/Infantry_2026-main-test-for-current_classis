@@ -278,8 +278,14 @@ static void DecodeDJIMotor(CANInstance *_instance)
 {
     // 这里对can instance的id进行了强制转换,从而获得电机的instance实例地址
     // _instance指针指向的id是对应电机instance的地址,通过强制转换为电机instance的指针,再通过->运算符访问电机的成员motor_measure,最后取地址获得指针
+    DJIMotorInstance *motor = (DJIMotorInstance *)_instance->id;
     uint8_t *rxbuff = _instance->rx_buff;
-    DJI_Motor_Measure_s *measure = &(((DJIMotorInstance *)_instance->id)->measure); // measure要多次使用,保存指针减小访存开销
+    DJI_Motor_Measure_s *measure = &motor->measure; // measure要多次使用,保存指针减小访存开销
+
+    // 喂狗 - 收到CAN报文表示电机在线
+    if (motor->motor_daemon != NULL) {
+        DaemonReload(motor->motor_daemon);
+    }
 
     // 解析数据并对电流和速度进行滤波,电机的反馈报文具体格式见电机说明手册
     measure->last_ecd = measure->ecd;
@@ -326,6 +332,14 @@ DJIMotorInstance *DJIMotorInit(Motor_Init_Config_s *config)
     config->can_init_config.can_module_callback = DecodeDJIMotor; // set callback
     config->can_init_config.id = instance;                        // set id,eq to address(it is identity)
     instance->motor_can_instance = CANRegister(&config->can_init_config);
+
+    // 注册电机离线检测 daemon (200ms超时, DaemonTask以1ms运行)
+    Daemon_Init_Config_s daemon_conf = {
+        .reload_count = 200,
+        .callback = NULL,  // 电机离线时不执行额外回调，由用户主动查询
+        .owner_id = instance,
+    };
+    instance->motor_daemon = DaemonRegister(&daemon_conf);
 
     DJIMotorEnable(instance);
     dji_motor_instance[idx++] = instance;
@@ -492,6 +506,18 @@ void DJIMotorControl()
             }
         }
     }
+}
+
+/**
+ * @brief 检查电机是否在线
+ * @param motor 电机实例指针
+ * @return uint8_t 1=在线, 0=离线
+ */
+uint8_t DJIMotorIsOnline(DJIMotorInstance *motor)
+{
+    if (motor == NULL || motor->motor_daemon == NULL)
+        return 0;
+    return DaemonIsOnline(motor->motor_daemon);
 }
 
 void ChassisPowerSet(float power)
