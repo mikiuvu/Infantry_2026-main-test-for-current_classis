@@ -4,7 +4,7 @@
 // module
 #include "remote_control.h"
 #include "ins_task.h"
-#include "bsp_vofa.h"
+#include "vofa.h"
 // ======================== 视觉通信协议条件编译 ========================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     #include "master_process.h"  // VCP/UART协议 (ROS2上位机)
@@ -844,7 +844,7 @@ void RobotCMDTask()
                          gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, yaw_vel,
                          gimbal_fetch_data.gimbal_imu_data.Pitch, pitch_vel,
                          (float)chassis_fetch_data.bullet_speed, bullet_count);
-    }
+    }0, 
 #endif
     
     chassis_cmd_send.friction_mode = shoot_cmd_send.friction_mode;

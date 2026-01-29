@@ -19,7 +19,7 @@
 #include "bsp_rng.h"
 #include "bsp_dwt.h"
 #include "controller.h"
-#include "bsp_vofa.h"
+#include "vofa.h"
 #include "simple_kalman.h"
 
 // 速度融合卡尔曼滤波器实例
@@ -223,7 +223,7 @@ void ChassisInit()
     
     // VOFA接收绑定 - 用于实时调参
     // CH0: imu_offset_x, CH1: imu_offset_y
-    VOFA_BIND(&imu_offset_x, &imu_offset_y);
+    VOFA_BIND(0, &imu_offset_x, &imu_offset_y);
 
     CANComm_Init_Config_s comm_conf = {
         .can_config = {
@@ -540,7 +540,7 @@ static void EstimateSpeed()
     }
     
     // VOFA+调试输出
-    VOFA(imu_raw_vx, imu_raw_vy, wheel_vx, wheel_vy,
+    VOFA(0, imu_raw_vx, imu_raw_vy, wheel_vx, wheel_vy,
          chassis_feedback_data.real_vx, chassis_feedback_data.real_vy, 
          imu_accel_x, imu_accel_y, wheel_slip[0].tcs_factor, wheel_slip[1].tcs_factor,
          wheel_slip[2].tcs_factor, wheel_slip[3].tcs_factor);

@@ -121,7 +121,6 @@ bsp/usb/bsp_usb.c \
 bsp/log/bsp_log.c \
 bsp/bsp_init.c \
 bsp/rng/bsp_rng.c \
-bsp/vofa/bsp_vofa.c \
 modules/algorithm/controller.c \
 modules/algorithm/kalman_filter.c \
 modules/algorithm/simple_kalman.c \
@@ -253,7 +252,6 @@ C_INCLUDES =  \
 -Ibsp/log \
 -Ibsp/pwm \
 -Ibsp/rng \
--Ibsp/vofa \
 -Ibsp/bsp_legacy_support \
 -Ibsp \
 -Imodules/algorithm \
