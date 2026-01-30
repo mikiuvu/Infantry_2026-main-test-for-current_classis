@@ -306,18 +306,18 @@ static void RemoteControlSet()
 #endif
         
         // 软件限位 - 到达限位时清零对应方向的前馈，防止越界
-        if (gimbal_cmd_send.pitch <= PITCH_VISION_MIN)
+        if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
          {
-             gimbal_cmd_send.pitch = PITCH_VISION_MIN;
+             gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
              // 清零向下的前馈（负方向）
              if (gimbal_cmd_send.pitch_speed_feedforward < 0)
                  gimbal_cmd_send.pitch_speed_feedforward = 0;
              if (gimbal_cmd_send.pitch_acc_feedforward < 0)
                  gimbal_cmd_send.pitch_acc_feedforward = 0;
          }
-         if (gimbal_cmd_send.pitch >= PITCH_VISION_MAX)
+         if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
          {
-             gimbal_cmd_send.pitch = PITCH_VISION_MAX;
+             gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
              // 清零向上的前馈（正方向）
              if (gimbal_cmd_send.pitch_speed_feedforward > 0)
                  gimbal_cmd_send.pitch_speed_feedforward = 0;
@@ -377,17 +377,17 @@ static void RemoteControlSet()
         last_rocker_l1 = rc_data[TEMP].rc.rocker_l1;
         
         // 摇杆控制的软件限位 - 到达限位时清零对应方向的前馈，防止越界
-         if (gimbal_cmd_send.pitch <= PITCH_RC_MIN)
+         if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
          {
-             gimbal_cmd_send.pitch = PITCH_RC_MIN;
+             gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
              if (gimbal_cmd_send.pitch_speed_feedforward < 0)
                  gimbal_cmd_send.pitch_speed_feedforward = 0;
              if (gimbal_cmd_send.pitch_acc_feedforward < 0)
                  gimbal_cmd_send.pitch_acc_feedforward = 0;
          }
-         if (gimbal_cmd_send.pitch >= PITCH_RC_MAX)
+         if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
          {
-             gimbal_cmd_send.pitch = PITCH_RC_MAX;
+             gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
              if (gimbal_cmd_send.pitch_speed_feedforward > 0)
                  gimbal_cmd_send.pitch_speed_feedforward = 0;
              if (gimbal_cmd_send.pitch_acc_feedforward > 0)
@@ -540,13 +540,13 @@ static void MouseKeySet()
     case 0:
         gimbal_cmd_send.yaw -= (float)rc_data[TEMP].mouse.x / 660 * 16; // 系数待测
         gimbal_cmd_send.pitch += (float)rc_data[TEMP].mouse.y / 660 * 16;
-        if (gimbal_cmd_send.pitch <= PITCH_KEY_MIN)
+        if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
         {
-             gimbal_cmd_send.pitch = PITCH_KEY_MIN;
+             gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
         }
-        else if (gimbal_cmd_send.pitch >= PITCH_KEY_MAX)
+        else if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
         {
-             gimbal_cmd_send.pitch = PITCH_KEY_MAX;
+             gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
         }
         chassis_cmd_send.aim_mode = AIM_OFF;
         break;
@@ -567,13 +567,13 @@ static void MouseKeySet()
             gimbal_cmd_send.pitch = aim_pitch;
         }
 #endif
-        if (gimbal_cmd_send.pitch <= PITCH_KEY_MIN)
+        if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
         {
-             gimbal_cmd_send.pitch = PITCH_KEY_MIN;
+             gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
         }
-        else if (gimbal_cmd_send.pitch >= PITCH_KEY_MAX)
+        else if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
         {
-             gimbal_cmd_send.pitch = PITCH_KEY_MAX;
+             gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
         }
         chassis_cmd_send.aim_mode = AIM_ON;
         break;

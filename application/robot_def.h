@@ -61,15 +61,8 @@
 #define PITCH_MIN_ANGLE 0 //云台竖直方向最小角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度)
 
 /* ======================== 云台软件限位 ======================== */
-// 视觉模式下的限位(上位机控制)
-#define PITCH_VISION_MIN        -20.0f  // 视觉模式pitch最小角度(°)
-#define PITCH_VISION_MAX        12.0f   // 视觉模式pitch最大角度(°)
-// 遥控器模式下的限位
-#define PITCH_RC_MIN            -20.0f  // 遥控器模式pitch最小角度(°)
-#define PITCH_RC_MAX            12.0f    // 遥控器模式pitch最大角度(°)
-// 键盘模式下的限位
-#define PITCH_KEY_MIN           -20.0f  // 键盘模式pitch最小角度(°)
-#define PITCH_KEY_MAX           12.0f   // 键盘模式pitch最大角度(°)
+#define PITCH_MIN_LIMIT         -20.0f  // pitch最小角度(°)
+#define PITCH_MAX_LIMIT         12.0f   // pitch最大角度(°)
 
 // 拨盘堵转检测与反转参数
 #define BLOCK_DETECT_THRESHOLD 0.80f   // 堵转判定误差阈值(误差/目标值)
