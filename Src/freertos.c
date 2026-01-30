@@ -218,9 +218,9 @@ void StartROBOTTASK(void const *argument)
 {
   while (1)
   {
-    // 200Hz
+    // 500Hz
     RobotTask();
-    osDelay(5);
+    osDelay(2);
   }
 }
 

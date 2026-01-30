@@ -6,6 +6,7 @@
 #include "general_def.h"
 #include "vofa.h" // VOFA+数据发送模块
 #include "bmi088.h"
+#include "bsp_dwt.h"  // 用于获取精确时间间隔
 
 static attitude_t *gimba_IMU_data; // 云台IMU数据
 static DJIMotorInstance *yaw_motor, *pitch_motor;
@@ -18,13 +19,32 @@ static Gimbal_Ctrl_Cmd_s gimbal_cmd_recv;         // 来自cmd的控制信息
 static Chassis_Upload_Data_s chassis_real_speed;
 static Subscriber_t *chassis_speed_sub; // 底盘反馈信息订阅者
 
-// ======================== 速度前馈 ========================
-static float yaw_speed_feedforward = 0.0f;    // yaw速度前馈 (来自cmd)
-static float pitch_speed_feedforward = 0.0f;  // pitch速度前馈 (来自cmd)
+// ======================== 速度前馈 (本地计算) ========================
+static float yaw_speed_feedforward = 0.0f;    // yaw速度前馈 (本地微分计算)
+static float pitch_speed_feedforward = 0.0f;  // pitch速度前馈 (本地微分计算)
 
 // ======================== 电流前馈 (加速度前馈 + 重力补偿) ========================
 static float yaw_current_feedforward = 0.0f;    // yaw电流前馈
 static float pitch_current_feedforward = 0.0f;  // pitch电流前馈
+
+// ======================== 本地前馈计算变量 ========================
+static float yaw_ref_prev = 0.0f;           // 上一次yaw目标角度
+static float pitch_ref_prev = 0.0f;         // 上一次pitch目标角度
+static float yaw_speed_raw_prev = 0.0f;     // 上一次yaw速度 (用于计算加速度)
+static float pitch_speed_raw_prev = 0.0f;   // 上一次pitch速度 (用于计算加速度)
+static float yaw_speed_filtered = 0.0f;     // 滤波后的yaw速度
+static float pitch_speed_filtered = 0.0f;   // 滤波后的pitch速度
+static float yaw_acc_filtered = 0.0f;       // 滤波后的yaw加速度
+static float pitch_acc_filtered = 0.0f;     // 滤波后的pitch加速度
+static uint32_t last_feedforward_time = 0;  // 上次计算时间戳(us)
+static uint8_t feedforward_initialized = 0; // 初始化标志
+
+// 前馈计算参数
+#define FEEDFORWARD_SPEED_LPF_RC    0.02f   // 速度前馈低通滤波时间常数(s)
+#define FEEDFORWARD_ACC_LPF_RC      0.03f   // 加速度前馈低通滤波时间常数(s)
+#define FEEDFORWARD_JUMP_THRESHOLD  50.0f   // 角度跳变阈值(°), 超过则视为模式切换
+#define FEEDFORWARD_RAMP_TIME       0.2f    // 跳变后渐变恢复时间(s)
+static float feedforward_ramp_factor = 1.0f; // 渐变系数 (0~1)
 void GimbalInit()
 {
     gimba_IMU_data = INS_Init(); // IMU先初始化,获取姿态数据指针赋给yaw电机的其他数据来源,
@@ -177,13 +197,81 @@ void GimbalTask()
         break;
     }
 
-    //更新速度前馈
-    yaw_speed_feedforward = gimbal_cmd_recv.yaw_speed_feedforward;
-    pitch_speed_feedforward = gimbal_cmd_recv.pitch_speed_feedforward;
-    //更新电流前馈
-    yaw_current_feedforward = YAW_ACC_TO_CURRENT * gimbal_cmd_recv.yaw_acc_feedforward;// 将角加速度转换为电流前馈
-
-    float pitch_acc_current = PITCH_ACC_TO_CURRENT * gimbal_cmd_recv.pitch_acc_feedforward;// Pitch电流前馈 = 加速度前馈 + 重力补偿
+    // ======================== 前馈计算 (微分目标角度) ========================
+    uint32_t current_time = DWT_GetTimeline_us();
+    float dt = (current_time - last_feedforward_time) * 1e-6f;  // 转换为秒
+    
+    // 防止dt异常 (首次运行或时间溢出)
+    if (dt <= 0 || dt > 0.1f || !feedforward_initialized) {
+        // 初始化历史值
+        yaw_ref_prev = gimbal_cmd_recv.yaw;
+        pitch_ref_prev = gimbal_cmd_recv.pitch;
+        yaw_speed_raw_prev = 0;
+        pitch_speed_raw_prev = 0;
+        yaw_speed_filtered = 0;
+        pitch_speed_filtered = 0;
+        yaw_acc_filtered = 0;
+        pitch_acc_filtered = 0;
+        last_feedforward_time = current_time;
+        feedforward_initialized = 1;
+        feedforward_ramp_factor = 1.0f;
+    } else {
+        // 计算角度变化量
+        float yaw_delta = gimbal_cmd_recv.yaw - yaw_ref_prev;
+        float pitch_delta = gimbal_cmd_recv.pitch - pitch_ref_prev;
+        
+        // 跳变检测: 角度突变时抑制前馈输出
+        if (fabsf(yaw_delta) > FEEDFORWARD_JUMP_THRESHOLD || 
+            fabsf(pitch_delta) > FEEDFORWARD_JUMP_THRESHOLD) {
+            // 检测到跳变, 重置前馈并开始渐变恢复
+            feedforward_ramp_factor = 0.0f;
+            yaw_speed_filtered = 0;
+            pitch_speed_filtered = 0;
+            yaw_acc_filtered = 0;
+            pitch_acc_filtered = 0;
+        } else {
+            // 计算原始速度 (一阶导数)
+            float yaw_speed_raw = yaw_delta / dt;
+            float pitch_speed_raw = pitch_delta / dt;
+            
+            // 计算原始加速度 (二阶导数)
+            float yaw_acc_raw = (yaw_speed_raw - yaw_speed_raw_prev) / dt;
+            float pitch_acc_raw = (pitch_speed_raw - pitch_speed_raw_prev) / dt;
+            
+            // 低通滤波 (一阶RC滤波器)
+            float speed_alpha = dt / (FEEDFORWARD_SPEED_LPF_RC + dt);
+            float acc_alpha = dt / (FEEDFORWARD_ACC_LPF_RC + dt);
+            
+            yaw_speed_filtered = yaw_speed_filtered + speed_alpha * (yaw_speed_raw - yaw_speed_filtered);
+            pitch_speed_filtered = pitch_speed_filtered + speed_alpha * (pitch_speed_raw - pitch_speed_filtered);
+            yaw_acc_filtered = yaw_acc_filtered + acc_alpha * (yaw_acc_raw - yaw_acc_filtered);
+            pitch_acc_filtered = pitch_acc_filtered + acc_alpha * (pitch_acc_raw - pitch_acc_filtered);
+            
+            // 保存当前速度用于下次加速度计算
+            yaw_speed_raw_prev = yaw_speed_raw;
+            pitch_speed_raw_prev = pitch_speed_raw;
+        }
+        
+        // 渐变恢复
+        if (feedforward_ramp_factor < 1.0f) {
+            feedforward_ramp_factor += dt / FEEDFORWARD_RAMP_TIME;
+            if (feedforward_ramp_factor > 1.0f) feedforward_ramp_factor = 1.0f;
+        }
+        
+        // 更新历史值
+        yaw_ref_prev = gimbal_cmd_recv.yaw;
+        pitch_ref_prev = gimbal_cmd_recv.pitch;
+        last_feedforward_time = current_time;
+    }
+    
+    // 应用渐变系数到前馈输出
+    yaw_speed_feedforward = yaw_speed_filtered * feedforward_ramp_factor;
+    pitch_speed_feedforward = pitch_speed_filtered * feedforward_ramp_factor;
+    
+    // 电流前馈 = 加速度前馈 * 系数
+    float yaw_acc_current = YAW_ACC_TO_CURRENT * yaw_acc_filtered * feedforward_ramp_factor;
+    float pitch_acc_current = PITCH_ACC_TO_CURRENT * pitch_acc_filtered * feedforward_ramp_factor;
+    yaw_current_feedforward = yaw_acc_current;  // yaw只有加速度前馈
     
     // ======================== Pitch重力补偿计算 ========================
     // 使用IMU的Pitch角度计算重力补偿: feedforward = MAX * cos(pitch_angle)

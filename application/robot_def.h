@@ -18,8 +18,8 @@
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
 //#define ONE_BOARD // 单板控制整车
-//#define CHASSIS_BOARD //底盘板
-#define GIMBAL_BOARD  //云台板
+#define CHASSIS_BOARD //底盘板
+//#define GIMBAL_BOARD  //云台板
 // #define BALANCE_BOARD //启用平衡底盘,则默认双板且当前板位底盘,目前不支持!请勿使用!
 
 // 视觉通信协议选择,只能开一个
@@ -133,13 +133,9 @@
 #define GYRO2GIMBAL_DIR_ROLL 1 //陀螺仪数据相较于云台的roll的方向,1为相同,-1为相反
 
 /* ======================== 云台前馈参数 ======================== */
-// 遥控器前馈系数 (控制周期200Hz, dt=0.005s)
-#define RC_YAW_SPEED_COEF       0.02f   // 遥控器yaw速度前馈系数 0.02f
-#define RC_PITCH_SPEED_COEF     0.005f  // 遥控器pitch速度前馈系数 0.005f
-#define RC_YAW_ACC_COEF         0.05f   // 遥控器yaw加速度前馈系数 0.05f
-#define RC_PITCH_ACC_COEF       0.00f   // 遥控器pitch加速度前馈系数 0.00f
+// 前馈现在在gimbal中本地计算, 不再从cmd传递
 
-// 视觉加速度-电流转换系数
+// 加速度-电流转换系数
 #define YAW_ACC_TO_CURRENT      1.0f    // yaw加速度(°/s²)转电流系数
 #define PITCH_ACC_TO_CURRENT    1.0f    // pitch加速度(°/s²)转电流系数
 
@@ -284,15 +280,12 @@ typedef struct
 } Chassis_Ctrl_Cmd_s;
 
 // cmd发布的云台控制数据,由gimbal订阅
+// 前馈现在在gimbal中本地计算 (微分目标角度), 不再通过消息传递
 typedef struct
 { // 云台角度控制
     float yaw;
     float pitch;
     float chassis_rotate_wz;
-    float yaw_speed_feedforward;    // yaw速度前馈
-    float pitch_speed_feedforward;  // pitch速度前馈
-    float yaw_acc_feedforward;      // yaw加速度前馈
-    float pitch_acc_feedforward;    // pitch加速度前馈
 
     gimbal_mode_e gimbal_mode;
 } Gimbal_Ctrl_Cmd_s;

@@ -67,11 +67,6 @@ static Robot_Status_e robot_state; // 机器人整体工作状态
 static float chassis_speed_buff;
 static Work_Mode_e vision_work_mode;
 
-
-//用于计算角加速度
-static int16_t last_rocker_l_ = 0;
-static int16_t last_rocker_l1 = 0;
-
 /**
  * @brief 二段灵敏度计算函数
  * @param rocker_value 摇杆值 (死区处理后)
@@ -291,55 +286,25 @@ static void RemoteControlSet()
             VisionRockerAdjust();
         }
 #elif defined(VISION_USE_SP)
-        // SP协议, 视觉返回目标角+前馈
+        // SP协议, 视觉返回目标角 (前馈现在在gimbal中本地计算)
         if (vision_recv_sp->mode != 0) {
             gimbal_cmd_send.yaw = vision_recv_sp->yaw;
             gimbal_cmd_send.pitch = vision_recv_sp->pitch;
-            gimbal_cmd_send.yaw_speed_feedforward = vision_recv_sp->yaw_vel;
-            gimbal_cmd_send.pitch_speed_feedforward = vision_recv_sp->pitch_vel;
-            gimbal_cmd_send.yaw_acc_feedforward = vision_recv_sp->yaw_acc;
-            gimbal_cmd_send.pitch_acc_feedforward = vision_recv_sp->pitch_acc;
             
             // 二段灵敏度微调
             VisionRockerAdjust();
         }
 #endif
         
-        // 软件限位 - 到达限位时清零对应方向的前馈，防止越界
+        // 软件限位
         if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
          {
              gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
-             // 清零向下的前馈（负方向）
-             if (gimbal_cmd_send.pitch_speed_feedforward < 0)
-                 gimbal_cmd_send.pitch_speed_feedforward = 0;
-             if (gimbal_cmd_send.pitch_acc_feedforward < 0)
-                 gimbal_cmd_send.pitch_acc_feedforward = 0;
          }
          if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
          {
              gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
-             // 清零向上的前馈（正方向）
-             if (gimbal_cmd_send.pitch_speed_feedforward > 0)
-                 gimbal_cmd_send.pitch_speed_feedforward = 0;
-             if (gimbal_cmd_send.pitch_acc_feedforward > 0)
-                 gimbal_cmd_send.pitch_acc_feedforward = 0;
          }
-        //  if (gimbal_cmd_send.yaw >= 30)
-        //  {
-        //      gimbal_cmd_send.yaw = 30;
-        //  }
-        //  if (gimbal_cmd_send.yaw <= -30)
-        //  {
-        //      gimbal_cmd_send.yaw = -30;
-        //  }
-        
-#if !defined(VISION_USE_SP)
-        // 非SP协议清零前馈
-        gimbal_cmd_send.yaw_speed_feedforward = 0;
-        gimbal_cmd_send.pitch_speed_feedforward = 0;
-        gimbal_cmd_send.yaw_acc_feedforward = 0;
-        gimbal_cmd_send.pitch_acc_feedforward = 0;
-#endif
          
         chassis_cmd_send.aim_mode = AIM_ON;
     }
@@ -364,43 +329,15 @@ static void RemoteControlSet()
         gimbal_cmd_send.yaw -= 0.002f * (float)rc_data[TEMP].rc.rocker_l_;
         gimbal_cmd_send.pitch -= 0.0015f * (float)rc_data[TEMP].rc.rocker_l1;
         
-        // 速度前馈
-        gimbal_cmd_send.yaw_speed_feedforward = -RC_YAW_SPEED_COEF * (float)rc_data[TEMP].rc.rocker_l_;
-        gimbal_cmd_send.pitch_speed_feedforward = -RC_PITCH_SPEED_COEF * (float)rc_data[TEMP].rc.rocker_l1;
-        
-        // 加速度前馈
-        gimbal_cmd_send.yaw_acc_feedforward = -RC_YAW_ACC_COEF * (float)(rc_data[TEMP].rc.rocker_l_ - last_rocker_l_);
-        gimbal_cmd_send.pitch_acc_feedforward = -RC_PITCH_ACC_COEF * (float)(rc_data[TEMP].rc.rocker_l1 - last_rocker_l1);
-        
-        // 更新历史摇杆值
-        last_rocker_l_ = rc_data[TEMP].rc.rocker_l_;
-        last_rocker_l1 = rc_data[TEMP].rc.rocker_l1;
-        
-        // 摇杆控制的软件限位 - 到达限位时清零对应方向的前馈，防止越界
+        // 软件限位
          if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
          {
              gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
-             if (gimbal_cmd_send.pitch_speed_feedforward < 0)
-                 gimbal_cmd_send.pitch_speed_feedforward = 0;
-             if (gimbal_cmd_send.pitch_acc_feedforward < 0)
-                 gimbal_cmd_send.pitch_acc_feedforward = 0;
          }
          if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
          {
              gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
-             if (gimbal_cmd_send.pitch_speed_feedforward > 0)
-                 gimbal_cmd_send.pitch_speed_feedforward = 0;
-             if (gimbal_cmd_send.pitch_acc_feedforward > 0)
-                 gimbal_cmd_send.pitch_acc_feedforward = 0;
          }
-        //  if (gimbal_cmd_send.yaw >= 30)
-        //  {
-        //      gimbal_cmd_send.yaw = 30;
-        //  }
-        //  if (gimbal_cmd_send.yaw <= -30)
-        //  {
-        //      gimbal_cmd_send.yaw = -30;
-        //  }
     }
 
     // 底盘参数,目前没有加入小陀螺(调试似乎暂时没有必要),系数需要调整
