@@ -22,6 +22,9 @@
 //#define GIMBAL_BOARD  //云台板
 // #define BALANCE_BOARD //启用平衡底盘,则默认双板且当前板位底盘,目前不支持!请勿使用!
 
+/* 遥控器类型选择: 定义USE_IMAGE_REMOTE使用图传遥控器(UART6), 注释掉则使用原DJI遥控器(USART3/DBUS) */
+//#define USE_IMAGE_REMOTE
+
 // 视觉通信协议选择,只能开一个
 
 #define VISION_USE_VCP          // USB虚拟串口

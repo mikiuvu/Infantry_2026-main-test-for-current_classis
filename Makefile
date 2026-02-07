@@ -150,6 +150,7 @@ modules/referee/rm_referee.c \
 modules/referee/referee_UI.c \
 modules/referee/referee_task.c \
 modules/remote/remote_control.c \
+modules/remote/transfer_image.c \
 modules/super_cap/super_cap.c \
 modules/can_comm/can_comm.c \
 modules/message_center/message_center.c \
