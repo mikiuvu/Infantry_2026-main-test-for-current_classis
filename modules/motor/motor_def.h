@@ -102,6 +102,7 @@ typedef enum
 {
     MOTOR_TYPE_NONE = 0,
     GM6020,
+    GM6020_CURRENT, // GM6020电流控制模式,使用0x1FE/0x2FE发送
     M3508,
     M2006,
     LK9025,

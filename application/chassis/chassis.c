@@ -213,13 +213,13 @@ void ChassisInit()
 
     // 超级电容初始化 - 如果没有超级电容可以注释掉
     // 注意: 如果注释掉,需要在LimitChassisOutput()中注释掉SuperCapSend()调用
-    // SuperCap_Init_Config_s cap_conf = {
-    //     .can_config = {
-    //         .can_handle = &hcan1,
-    //         .tx_id = 0x061, // 超级电容默认接收id通信can1
-    //         .rx_id = 0x051, // 超级电容默认发送id,注意tx和rx在其他人看来是反的
-    //     }};
-    // cap = SuperCapInit(&cap_conf); // ww超级电容初始化
+    SuperCap_Init_Config_s cap_conf = {
+        .can_config = {
+            .can_handle = &hcan1,
+            .tx_id = 0x061, // 超级电容默认接收id通信can1
+            .rx_id = 0x051, // 超级电容默认发送id,注意tx和rx在其他人看来是反的
+        }};
+    cap = SuperCapInit(&cap_conf); // ww超级电容初始化
     
     // 发布订阅初始化,如果为双板,则需要can comm来传递消息    
 #ifdef CHASSIS_BOARD
@@ -683,7 +683,7 @@ void ChassisTask()
     ui_data.Pitch_angle = -chassis_cmd_recv.pitch_angle;
     ui_data.offset_angle = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode = chassis_cmd_recv.aim_mode;
-    // ui_data.capEnergy = cap->cap_msg.capEnergy;  // 超级电容未启用时注释掉
+    ui_data.capEnergy = cap->cap_msg.capEnergy;  // 超级电容未启用时注释掉
 
     // 推送反馈消息
 #ifdef ONE_BOARD

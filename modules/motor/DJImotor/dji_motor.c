@@ -16,22 +16,29 @@ static DJIMotorInstance *dji_motor_instance[DJI_MOTOR_CNT] = {NULL};
  * 反馈(rx_id): GM6020: 0x204+id ; C610/C620: 0x200+id
  * can1: [0]:0x1FF,[1]:0x200,[2]:0x2FF
  * can2: [3]:0x1FF,[4]:0x200,[5]:0x2FF
+ * GM6020电流控制模式:
+ * can1: [6]:0x1FE,[7]:0x2FE
+ * can2: [8]:0x1FE,[9]:0x2FE
  */
-static CANInstance sender_assignment[6] = {
+static CANInstance sender_assignment[10] = {
     [0] = {.can_handle = &hcan1, .txconf.StdId = 0x1ff, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},
     [1] = {.can_handle = &hcan1, .txconf.StdId = 0x200, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},
     [2] = {.can_handle = &hcan1, .txconf.StdId = 0x2ff, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},
     [3] = {.can_handle = &hcan2, .txconf.StdId = 0x1ff, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},
     [4] = {.can_handle = &hcan2, .txconf.StdId = 0x200, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},
     [5] = {.can_handle = &hcan2, .txconf.StdId = 0x2ff, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},
+    [6] = {.can_handle = &hcan1, .txconf.StdId = 0x1fe, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},  // GM6020 id 1-4 CAN1
+    [7] = {.can_handle = &hcan1, .txconf.StdId = 0x2fe, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},  // GM6020 id 5-7 CAN1
+    [8] = {.can_handle = &hcan2, .txconf.StdId = 0x1fe, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},  // GM6020 id 1-4 CAN2
+    [9] = {.can_handle = &hcan2, .txconf.StdId = 0x2fe, .txconf.IDE = CAN_ID_STD, .txconf.RTR = CAN_RTR_DATA, .txconf.DLC = 0x08, .tx_buff = {0}},  // GM6020 id 5-7 CAN2
 };
 
 /**
- * @brief 6个用于确认是否有电机注册到sender_assignment中的标志位,防止发送空帧,此变量将在DJIMotorControl()使用
+ * @brief 10个用于确认是否有电机注册到sender_assignment中的标志位,防止发送空帧,此变量将在DJIMotorControl()使用
  *        flag的初始化在 MotorSenderGrouping()中进行
  *
  */
-static uint8_t sender_enable_flag[6] = {0};
+static uint8_t sender_enable_flag[10] = {0};
 
 /**
  * @brief 根据电调/拨码开关上的ID,根据说明书的默认id分配方式计算发送ID和接收ID,
@@ -102,6 +109,34 @@ static void MotorSenderGrouping(DJIMotorInstance *motor, CAN_Init_Config_s *conf
                 LOGERROR("[dji_motor] ID crash. Check in debug mode, add dji_motor_instance to watch to get more information.");
                 while (1)
                     ; // 6020的id 1-4和2006/3508的id 5-8会发生冲突(若有注册,即1!5,2!6,3!7,4!8)
+            }
+        }
+        break;
+
+    case GM6020_CURRENT: // GM6020电流控制模式,发送帧为0x1FE/0x2FE
+        if (motor_id < 4)
+        {
+            motor_send_num = motor_id;
+            motor_grouping = config->can_handle == &hcan1 ? 6 : 8;
+        }
+        else
+        {
+            motor_send_num = motor_id - 4;
+            motor_grouping = config->can_handle == &hcan1 ? 7 : 9;
+        }
+
+        config->rx_id = 0x204 + motor_id + 1;   // 反馈报文与电压控制模式相同
+        sender_enable_flag[motor_grouping] = 1;
+        motor->message_num = motor_send_num;
+        motor->sender_group = motor_grouping;
+
+        for (size_t i = 0; i < idx; ++i)
+        {
+            if (dji_motor_instance[i]->motor_can_instance->can_handle == config->can_handle && dji_motor_instance[i]->motor_can_instance->rx_id == config->rx_id)
+            {
+                LOGERROR("[dji_motor] ID crash. Check in debug mode, add dji_motor_instance to watch to get more information.");
+                while (1)
+                    ;
             }
         }
         break;
@@ -495,7 +530,7 @@ void DJIMotorControl()
 #endif
 
     // 遍历flag,检查是否要发送这一帧报文
-    for (size_t i = 0; i < 6; ++i)
+    for (size_t i = 0; i < 10; ++i)
     {
         if (sender_enable_flag[i])
         {
