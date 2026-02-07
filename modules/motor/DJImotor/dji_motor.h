@@ -32,13 +32,19 @@
 #define CURRENT_SMOOTH_COEF 0.9f     // 必须大于0.9
 #define ECD_ANGLE_COEF_DJI 0.043945f // (360/8192),将编码器值转化为角度制
 
-#define k0 0.6641993412640775f
-#define k1 0.006444284468539646f
-#define k2 0.0001423857226262331f
-#define k3 0.017644430204543864f
-#define k4 0.1650143850678086f
-#define k5 3.096721772539512e-05f
+// #define k0 0.6641993412640775f
+// #define k1 0.006444284468539646f
+// #define k2 0.0001423857226262331f
+// #define k3 0.017644430204543864f
+// #define k4 0.1650143850678086f
+// #define k5 3.096721772539512e-05f
 
+#define k0 1.2391161904854413
+#define k1 0.2436111085441473
+#define k2 -0.00047357706462076526
+#define k3 0.01546691285015511
+#define k4 0.16057224446247137
+#define k5 1.4871948258296665e-05
 /* DJI电机CAN反馈信息*/
 typedef struct
 {
@@ -118,12 +124,6 @@ void DJIMotorChangeFeed(DJIMotorInstance *motor, Closeloop_Type_e loop, Feedback
  * @todo  增加前馈功能
  */
 void DJIMotorControl();
-
-/**
- * @brief 同步电机实例
- * @todo  用于功率控制
- */
-void Chassis_motor(DJIMotorInstance *motor_lf,DJIMotorInstance *motor_lb,DJIMotorInstance *motor_rf,DJIMotorInstance *motor_rb);
 
 /**
  * @brief 停止电机,注意不是将设定值设为零,而是直接给电机发送的电流值置零

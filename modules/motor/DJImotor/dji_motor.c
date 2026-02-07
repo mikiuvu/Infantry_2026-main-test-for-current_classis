@@ -148,7 +148,6 @@ static void MotorSenderGrouping(DJIMotorInstance *motor, CAN_Init_Config_s *conf
     }
 }
 
-/* ========================= 功率控制相关变量 ========================= */
 // 底盘电机指针数组(用于功率限制)
 static DJIMotorInstance *dji_motor_powerLimit_3508[POWER_LIMIT_3508_CNT] = {NULL};
 static uint8_t idx_powerLimit_3508 = 0;
@@ -157,21 +156,6 @@ static uint8_t idx_powerLimit_3508 = 0;
 static float Chassis_Power_Max = 30.0f;  // 底盘功率上限(W),应从裁判系统获取
 static float limit_coef = 1.0f;          // 电流衰减系数(0~1)
 static float total_predicted_power = 0;  // 总预测功率
-
-/**
- * @brief 注册底盘电机用于功率限制
- * @param motor_lf 左前电机
- * @param motor_lb 左后电机
- * @param motor_rf 右前电机
- * @param motor_rb 右后电机
- */
-void Chassis_motor(DJIMotorInstance *motor_lf, DJIMotorInstance *motor_lb, DJIMotorInstance *motor_rf, DJIMotorInstance *motor_rb)
-{
-    DJIMotorSetPowerLimitMotors(motor_lf, M3508);
-    DJIMotorSetPowerLimitMotors(motor_lb, M3508);
-    DJIMotorSetPowerLimitMotors(motor_rf, M3508);
-    DJIMotorSetPowerLimitMotors(motor_rb, M3508);
-}
 
 /**
  * @brief 注册需要进行功率限制的电机
@@ -312,7 +296,6 @@ float DJIMotorGetPowerLimitCoef(void)
 static void DecodeDJIMotor(CANInstance *_instance)
 {
     // 这里对can instance的id进行了强制转换,从而获得电机的instance实例地址
-    // _instance指针指向的id是对应电机instance的地址,通过强制转换为电机instance的指针,再通过->运算符访问电机的成员motor_measure,最后取地址获得指针
     DJIMotorInstance *motor = (DJIMotorInstance *)_instance->id;
     uint8_t *rxbuff = _instance->rx_buff;
     DJI_Motor_Measure_s *measure = &motor->measure; // measure要多次使用,保存指针减小访存开销

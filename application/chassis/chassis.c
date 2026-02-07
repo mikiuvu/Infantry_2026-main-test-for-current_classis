@@ -182,30 +182,34 @@ void ChassisInit()
     };
     
     // LF电机
-    chassis_motor_config.can_init_config.tx_id = 4;
+    chassis_motor_config.can_init_config.tx_id = 2;
     chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
     chassis_motor_config.controller_param_init_config.current_feedforward_ptr = &current_ff_lf;
     motor_lf = DJIMotorInit(&chassis_motor_config);
 
     // RF电机
-    chassis_motor_config.can_init_config.tx_id = 1;
+    chassis_motor_config.can_init_config.tx_id = 3;
     chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     chassis_motor_config.controller_param_init_config.current_feedforward_ptr = &current_ff_rf;
     motor_rf = DJIMotorInit(&chassis_motor_config);
 
     // LB电机
-    chassis_motor_config.can_init_config.tx_id = 2;
+    chassis_motor_config.can_init_config.tx_id = 1;
     chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     chassis_motor_config.controller_param_init_config.current_feedforward_ptr = &current_ff_lb;
     motor_lb = DJIMotorInit(&chassis_motor_config);
 
     // RB电机
-    chassis_motor_config.can_init_config.tx_id = 3;
+    chassis_motor_config.can_init_config.tx_id = 4;
     chassis_motor_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_NORMAL;
     chassis_motor_config.controller_param_init_config.current_feedforward_ptr = &current_ff_rb;
     motor_rb = DJIMotorInit(&chassis_motor_config);
 
-    Chassis_motor(motor_lf, motor_lb, motor_rf, motor_rb); // 同步电机实例
+    // 注册底盘电机用于功率限制
+    DJIMotorSetPowerLimitMotors(motor_lf, M3508);
+    DJIMotorSetPowerLimitMotors(motor_rf, M3508);
+    DJIMotorSetPowerLimitMotors(motor_lb, M3508);
+    DJIMotorSetPowerLimitMotors(motor_rb, M3508);
 
     // 裁判系统初始化 - 如果没有连接裁判系统可以注释掉
     // 注意: 如果注释掉,需要在LimitChassisOutput()中处理referee_data的空指针问题
@@ -378,7 +382,7 @@ static void LimitChassisOutput()
 {   
     static float chassis_power_buff = 1;
 
-    ChassisPowerSet(80);
+    ChassisPowerSet(30);
     
     static uint32_t cnt = 0;
     if ((cnt++) % 125 == 0)  // 125*2ms=250ms
