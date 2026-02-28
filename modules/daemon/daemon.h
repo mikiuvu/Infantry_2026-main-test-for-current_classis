@@ -8,14 +8,22 @@
 /* 模块离线处理函数指针 */
 typedef void (*offline_callback)(void *);
 
+/* 在线状态枚举 */
+typedef enum
+{
+    OFFLINE = 0,
+    ONLINE = 1
+} Daemon_Online_Status_e;
+
 /* daemon结构体定义 */
 typedef struct daemon_ins
 {
     uint16_t reload_count;     // 重载值
     offline_callback callback; // 异常处理函数,当模块发生异常时会被调用
 
-    uint16_t temp_count; // 当前值,减为零说明模块离线或异常
-    void *owner_id;      // daemon实例的地址,初始化的时候填入
+    uint16_t temp_count;            // 当前值,减为零说明模块离线或异常
+    Daemon_Online_Status_e is_online; // 在线状态标志
+    void *owner_id;                 // daemon实例的地址,初始化的时候填入
 } DaemonInstance;
 
 /* daemon初始化配置 */

@@ -16,6 +16,7 @@ DaemonInstance *DaemonRegister(Daemon_Init_Config_s *config)
     instance->reload_count = config->reload_count;
     instance->callback = config->callback;
     instance->temp_count = config->reload_count;
+    instance->is_online = ONLINE; // 注册时默认在线
     daemon_instances[idx++] = instance;
     return instance;
 }
@@ -24,11 +25,12 @@ DaemonInstance *DaemonRegister(Daemon_Init_Config_s *config)
 void DaemonReload(DaemonInstance *instance)
 {
     instance->temp_count = instance->reload_count;
+    instance->is_online = ONLINE;
 }
 
 uint8_t DaemonIsOnline(DaemonInstance *instance)
 {
-    return instance->temp_count > 0;
+    return instance->is_online;
 }
 
 void DaemonTask()
@@ -38,10 +40,14 @@ void DaemonTask()
     {
         dins = daemon_instances[i];
         if (dins->temp_count > 0) // 如果计数器还有值,说明上一次喂狗后还没有超时,则计数器减一
-            dins->temp_count--;
-        else if (dins->callback) // 等于零说明超时了,调用回调函数(如果有的话)
         {
-            dins->callback(dins->owner_id); // module内可以将owner_id强制类型转换成自身类型从而调用特定module的offline callback
+            dins->temp_count--;
+        }
+        else // 等于零说明超时了
+        {
+            dins->is_online = OFFLINE; // 标记为离线
+            if (dins->callback)  // 调用回调函数(如果有的话)
+                dins->callback(dins->owner_id); // module内可以将owner_id强制类型转换成自身类型从而调用特定module的offline callback
         }
     }
 }

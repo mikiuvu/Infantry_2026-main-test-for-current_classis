@@ -159,6 +159,7 @@ modules/daemon/daemon.c \
 modules/vofa/vofa.c \
 application/gimbal/gimbal.c \
 application/chassis/chassis.c \
+application/chassis/chassis_force_ctrl.c \
 application/shoot/shoot.c \
 application/cmd/robot_cmd.c \
 application/balance_chassis/balance.c \

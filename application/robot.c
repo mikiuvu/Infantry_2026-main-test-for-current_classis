@@ -9,7 +9,11 @@
 #endif // !ROBOT_DEF_PARAM_WARNING
 
 #if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
-#include "chassis.h"
+#include "chassis.h"                     // 原速度控制底盘
+#endif
+
+#ifdef FORCE_CONTROL_CHASSIS_BOARD
+#include "chassis/chassis_force_ctrl.h"  // 力控底盘
 #endif
 
 #ifdef GIMBAL_BOARD
@@ -17,7 +21,7 @@
 #include "shoot.h"
 #endif
 
-#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY)
+#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY) || defined(FORCE_CONTROL_CHASSIS_BOARD)
 #include "robot_cmd.h"
 #endif
 
@@ -35,7 +39,7 @@ void RobotInit()
     
     BSPInit();
 
-#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY)
+#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY) || defined(FORCE_CONTROL_CHASSIS_BOARD)
     RobotCMDInit();
 #endif
 
@@ -45,7 +49,11 @@ void RobotInit()
 #endif
 
 #if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
-    ChassisInit();
+    ChassisInit();           // 原底盘初始化
+#endif
+
+#ifdef FORCE_CONTROL_CHASSIS_BOARD
+    ChassisForceCtrlInit();  // 力控底盘初始化
 #endif
 
 #ifdef BALANCE_BAORD
@@ -59,7 +67,7 @@ void RobotInit()
 void RobotTask()
 {
     
-#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY)
+#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY) || defined(FORCE_CONTROL_CHASSIS_BOARD)
     RobotCMDTask();
 #endif
 
@@ -69,7 +77,11 @@ void RobotTask()
 #endif
 
 #if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
-    ChassisTask();
+    ChassisTask();           // 原底盘任务
+#endif
+
+#ifdef FORCE_CONTROL_CHASSIS_BOARD
+    ChassisForceCtrlTask();  // 力控底盘任务
 #endif
 
 #ifdef BALANCE_BAORD

@@ -17,10 +17,10 @@
 #include "stdint.h"
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
-//#define CHASSIS_BOARD //底盘板
-#define GIMBAL_BOARD  //云台板
-//#define BALANCE_BOARD //启用平衡底盘,则默认双板且当前板位底盘,目前不支持!请勿使用!
-//#define CHASSIS_ONLY // 底盘调试模式: 无云台,只有底盘+超级电容+遥控器
+//#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
+//#define CHASSIS_ONLY                  // 底盘调试模式: 无云台,只有底盘+超级电容+遥控器 
+//#define FORCE_CONTROL_CHASSIS_BOARD   // 力控底盘板
+#define GIMBAL_BOARD                    // 云台板
 
 /* 遥控器类型选择: 定义USE_IMAGE_REMOTE使用图传遥控器(UART6), 注释掉则使用原DJI遥控器(USART3/DBUS) */
 //#define USE_IMAGE_REMOTE
@@ -98,8 +98,8 @@
 // Yaw/Pitch/Roll: IMU安装相对于机体系的偏角 (度)
 // scale: 陀螺仪标度因数校正 (默认1.0)
 
-#ifdef CHASSIS_BOARD
-// 底盘板IMU安装方向校正
+#if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY) || defined(FORCE_CONTROL_CHASSIS_BOARD)
+// 底盘板IMU安装方向校正 (速控/力控/调试模式通用)
 #define IMU_PARAM_YAW        0.0f    // IMU Yaw偏角 (°)
 #define IMU_PARAM_PITCH      0.0f    // IMU Pitch偏角 (°)
 #define IMU_PARAM_ROLL       0.0f    // IMU Roll偏角 (°)
@@ -118,26 +118,9 @@
 #define IMU_PARAM_SCALE_Z    1.0f    // 陀螺仪 Z轴标度因数
 #endif
 
-#ifdef CHASSIS_ONLY
-// 底盘调试模式IMU安装方向校正
-#define IMU_PARAM_YAW        0.0f    // IMU Yaw偏角 (°)
-#define IMU_PARAM_PITCH      0.0f    // IMU Pitch偏角 (°)
-#define IMU_PARAM_ROLL       0.0f    // IMU Roll偏角 (°)
-#define IMU_PARAM_SCALE_X    1.0f    // 陀螺仪 X轴标度因数
-#define IMU_PARAM_SCALE_Y    1.0f    // 陀螺仪 Y轴标度因数
-#define IMU_PARAM_SCALE_Z    1.0f    // 陀螺仪 Z轴标度因数
-#endif
-
-
-/* ======================== 陀螺仪到云台方向映射 ======================== */
-
-#define GYRO2GIMBAL_DIR_YAW 1 //陀螺仪数据相较于云台的yaw的方向,1为相同,-1为相反
-#define GYRO2GIMBAL_DIR_PITCH 1 //陀螺仪数据相较于云台的pitch的方向,1为相同,-1为相反
-#define GYRO2GIMBAL_DIR_ROLL 1 //陀螺仪数据相较于云台的roll的方向,1为相同,-1为相反
 
 /* ======================== 云台前馈参数 ======================== */
-// 前馈现在在gimbal中本地计算, 不再从cmd传递
-
+// 前馈在gimbal中本地计算
 // 加速度-电流转换系数
 #define YAW_ACC_TO_CURRENT      1.0f    // yaw加速度(°/s²)转电流系数
 #define PITCH_ACC_TO_CURRENT    1.0f    // pitch加速度(°/s²)转电流系数
@@ -147,9 +130,8 @@
 #define PITCH_HORIZONTAL_ANGLE  -1.2f      // pitch水平时的IMU角度(°)
 
 // 检查是否出现主控板定义冲突,只允许一个开发板定义存在,否则编译会自动报错
-#if (defined(CHASSIS_BOARD) && defined(GIMBAL_BOARD)) || \
-    (defined(CHASSIS_ONLY) && (defined(CHASSIS_BOARD) || defined(GIMBAL_BOARD)))
-#error Conflict board definition! You can only define one board type.
+#if (defined(CHASSIS_BOARD) + defined(GIMBAL_BOARD) + defined(CHASSIS_ONLY) + defined(FORCE_CONTROL_CHASSIS_BOARD)) != 1
+#error Conflict board definition! You must define exactly ONE board type (CHASSIS_BOARD, GIMBAL_BOARD, CHASSIS_ONLY, or FORCE_CONTROL_CHASSIS_BOARD).
 #endif
 
 #pragma pack(1) // 压缩结构体,取消字节对齐,下面的数据都可能被传输
