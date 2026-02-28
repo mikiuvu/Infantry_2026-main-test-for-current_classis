@@ -7,6 +7,7 @@
 #include "vofa.h" // VOFA+数据发送模块
 #include "bmi088.h"
 #include "bsp_dwt.h"  // 用于获取精确时间间隔
+#include "dji_motor_offline_alarm.h" // 电机离线检测
 
 static attitude_t *gimba_IMU_data; // 云台IMU数据
 static DJIMotorInstance *yaw_motor, *pitch_motor;
@@ -45,6 +46,10 @@ static uint8_t feedforward_initialized = 0; // 初始化标志
 #define FEEDFORWARD_JUMP_THRESHOLD  50.0f   // 角度跳变阈值(°), 超过则视为模式切换
 #define FEEDFORWARD_RAMP_TIME       0.2f    // 跳变后渐变恢复时间(s)
 static float feedforward_ramp_factor = 1.0f; // 渐变系数 (0~1)
+
+// 云台电机离线检测实例
+static MotorOfflineAlarmInstance *gimbal_offline_alarm = NULL;
+
 void GimbalInit()
 {
     gimba_IMU_data = INS_Init(); // IMU先初始化,获取姿态数据指针赋给yaw电机的其他数据来源,
@@ -78,7 +83,7 @@ void GimbalInit()
                 .Output_LPF_RC = 0.002,//0.002
                 .Improve = PID_Trapezoid_Intergral |PID_Integral_Limit |PID_Derivative_On_Measurement |  PID_OutputFilter,
                 .IntegralLimit = 5000,
-                .MaxOut = 20000,
+                .MaxOut = 100,//20000
             },
             .other_angle_feedback_ptr = &gimba_IMU_data->YawTotalAngle,
             // 还需要增加角速度额外反馈指针,注意方向,ins_task.md中有c板的bodyframe坐标系说明
@@ -150,11 +155,24 @@ void GimbalInit()
     gimbal_pub = PubRegister("gimbal_feed", sizeof(Gimbal_Upload_Data_s));
     gimbal_sub = SubRegister("gimbal_cmd", sizeof(Gimbal_Ctrl_Cmd_s));
     chassis_speed_sub = SubRegister("chassis_feed", sizeof(Chassis_Upload_Data_s));
+    
+    // 云台电机离线检测配置 (类似PID配置风格)
+    MotorOfflineAlarmConfig_t gimbal_alarm_cfg = {
+        .motors = {yaw_motor, pitch_motor},
+        .beep_times = {1, 2},       // yaw=1声, pitch=2声
+        .motor_count = 2,
+        .buzzer_freq = ALARM_FREQ_HIGH,
+        .run_buzzer_task = 1,       // 主模块执行BuzzerTask
+    };
+    gimbal_offline_alarm = MotorOfflineAlarmRegister(&gimbal_alarm_cfg);
 }
 
 /* 机器人云台控制核心任务,后续考虑只保留IMU控制,不再需要电机的反馈 */
 void GimbalTask()
 {
+    // 电机离线报警: yaw=1声, pitch=2声
+    MotorOfflineAlarmTask(gimbal_offline_alarm);
+    
     // 获取云台控制数据
     // 后续增加未收到数据的处理
     SubGetMessage(gimbal_sub, &gimbal_cmd_recv);

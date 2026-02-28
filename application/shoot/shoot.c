@@ -5,6 +5,7 @@
 #include "bsp_dwt.h"
 #include "general_def.h"
 #include "servo_motor.h"
+#include "dji_motor_offline_alarm.h" // 电机离线检测
 
 #ifdef USE_LASER_POINTER
 /* ======================== 激光笔模式 ======================== */
@@ -93,6 +94,9 @@ static float loader_current_forward = 0;
 // dwt定时
 static float hibernate_time = 0, dead_time = 0, blocked_num = 0, blocked_time = 0;
 static float load_angle_set = 0;
+
+// 发射电机离线检测实例
+static MotorOfflineAlarmInstance *shoot_offline_alarm = NULL;
 
 void ShootInit()
 {
@@ -236,12 +240,25 @@ void ShootInit()
     //Servo_Motor_StartSTOP_Angle_Set(lid_R,-5,66);
     shoot_pub = PubRegister("shoot_feed", sizeof(Shoot_Upload_Data_s));
     shoot_sub = SubRegister("shoot_cmd", sizeof(Shoot_Ctrl_Cmd_s));
+    
+    // 发射电机离线检测配置 
+    MotorOfflineAlarmConfig_t shoot_alarm_cfg = {
+        .motors = {loader, friction_l, friction_r},
+        .beep_times = {3, 4, 5},        // loader=3声, friction_l=4声, friction_r=5声
+        .motor_count = 3,
+        .buzzer_freq = ALARM_FREQ_HIGH, // 高音调
+        .run_buzzer_task = 0,           // 云台已执行BuzzerTask
+    };
+    shoot_offline_alarm = MotorOfflineAlarmRegister(&shoot_alarm_cfg);
 }
 
 /* 机器人发射机构控制核心任务 */
 void ShootTask()
 {
-    // 从cmd获取控制数据
+    // 电机离线报警: loader=3声, friction_l=4声, friction_r=5声
+    MotorOfflineAlarmTask(shoot_offline_alarm);
+    
+    // 从 cmd获取控制数据
     SubGetMessage(shoot_sub, &shoot_cmd_recv);
     // 对shoot mode等于SHOOT_STOP的情况特殊处理,直接停止所有电机(紧急停止)
     if (shoot_cmd_recv.shoot_mode == SHOOT_OFF)

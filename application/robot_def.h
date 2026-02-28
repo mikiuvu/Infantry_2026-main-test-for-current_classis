@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file robot_def.h
  * @author NeoZeng neozng1@hnu.edu.cn
  * @author Even
@@ -17,10 +17,10 @@
 #include "stdint.h"
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
-//#define ONE_BOARD // 单板控制整车
 #define CHASSIS_BOARD //底盘板
 //#define GIMBAL_BOARD  //云台板
-// #define BALANCE_BOARD //启用平衡底盘,则默认双板且当前板位底盘,目前不支持!请勿使用!
+//#define BALANCE_BOARD //启用平衡底盘,则默认双板且当前板位底盘,目前不支持!请勿使用!
+//#define CHASSIS_ONLY // 底盘调试模式: 无云台,只有底盘+超级电容+遥控器
 
 /* 遥控器类型选择: 定义USE_IMAGE_REMOTE使用图传遥控器(UART6), 注释掉则使用原DJI遥控器(USART3/DBUS) */
 //#define USE_IMAGE_REMOTE
@@ -118,8 +118,8 @@
 #define IMU_PARAM_SCALE_Z    1.0f    // 陀螺仪 Z轴标度因数
 #endif
 
-#ifdef ONE_BOARD
-// 单板IMU安装方向校正
+#ifdef CHASSIS_ONLY
+// 底盘调试模式IMU安装方向校正
 #define IMU_PARAM_YAW        0.0f    // IMU Yaw偏角 (°)
 #define IMU_PARAM_PITCH      0.0f    // IMU Pitch偏角 (°)
 #define IMU_PARAM_ROLL       0.0f    // IMU Roll偏角 (°)
@@ -147,9 +147,8 @@
 #define PITCH_HORIZONTAL_ANGLE  -1.2f      // pitch水平时的IMU角度(°)
 
 // 检查是否出现主控板定义冲突,只允许一个开发板定义存在,否则编译会自动报错
-#if (defined(ONE_BOARD) && defined(CHASSIS_BOARD)) || \
-    (defined(ONE_BOARD) && defined(GIMBAL_BOARD)) ||  \
-    (defined(CHASSIS_BOARD) && defined(GIMBAL_BOARD))
+#if (defined(CHASSIS_BOARD) && defined(GIMBAL_BOARD)) || \
+    (defined(CHASSIS_ONLY) && (defined(CHASSIS_BOARD) || defined(GIMBAL_BOARD)))
 #error Conflict board definition! You can only define one board type.
 #endif
 

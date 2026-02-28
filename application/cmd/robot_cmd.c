@@ -30,10 +30,11 @@
 #include "can_comm.h"
 static CANCommInstance *cmd_can_comm; // 双板通信
 #endif
-#ifdef ONE_BOARD
+
+#ifdef CHASSIS_ONLY
 static Publisher_t *chassis_cmd_pub;   // 底盘控制消息发布者
 static Subscriber_t *chassis_feed_sub; // 底盘反馈信息订阅者
-#endif                                 // ONE_BOARD
+#endif                                 // CHASSIS_ONLY
 
 //#define OUTBREAK_PRIORITY
 #define COOLING_PRIORITY
@@ -180,6 +181,12 @@ void RobotCMDInit()
     rc_data = RemoteControlInit(&huart3);   // 修改为对应串口,注意如果是自研板dbus协议串口需选用添加了反相器的那个
 #endif
     
+#ifdef CHASSIS_ONLY
+    // ===================== CHASSIS_ONLY模式: 只初始化底盘 =====================
+    chassis_cmd_pub = PubRegister("chassis_cmd", sizeof(Chassis_Ctrl_Cmd_s));
+    chassis_feed_sub = SubRegister("chassis_feed", sizeof(Chassis_Upload_Data_s));
+    robot_state = ROBOT_READY;
+#else
     // ======================== 视觉通信初始化 - 根据协议类型 ========================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     vision_recv_data = VisionInit(&huart1); // VCP/UART协议
@@ -194,10 +201,6 @@ void RobotCMDInit()
     shoot_cmd_pub = PubRegister("shoot_cmd", sizeof(Shoot_Ctrl_Cmd_s));
     shoot_feed_sub = SubRegister("shoot_feed", sizeof(Shoot_Upload_Data_s));
 
-#ifdef ONE_BOARD // 双板兼容
-    chassis_cmd_pub = PubRegister("chassis_cmd", sizeof(Chassis_Ctrl_Cmd_s));
-    chassis_feed_sub = SubRegister("chassis_feed", sizeof(Chassis_Upload_Data_s));
-#endif // ONE_BOARD通信can1
 #ifdef GIMBAL_BOARD
     CANComm_Init_Config_s comm_conf = {
         .can_config = {
@@ -215,6 +218,7 @@ void RobotCMDInit()
     gimbal_cmd_send.yaw = 0;
     gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
     robot_state = ROBOT_READY; // 启动时机器人进入工作模式,后续加入所有应用初始化完成之后再进入
+#endif // CHASSIS_ONLY
 }
 
 /**
@@ -252,6 +256,40 @@ static void CalcOffsetAngle()
 static void RemoteControlSet()
 {
     chassis_cmd_send.chassis_power_buff = 1;
+    
+#ifdef CHASSIS_ONLY
+    // ===================== CHASSIS_ONLY模式: 仅底盘控制 =====================
+    // 右侧开关控制底盘模式
+    if (switch_is_down(rc_data[TEMP].rc.switch_right))
+    {
+        chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;  // 小陀螺
+    }
+    else if (switch_is_mid(rc_data[TEMP].rc.switch_right))
+    {
+        chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;  // 自由平移
+    }
+    else if (switch_is_up(rc_data[TEMP].rc.switch_right))
+    {
+        chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;  // 跟头模式(左摇杆转向)
+    }
+
+    // 底盘速度控制 - 右摇杆
+    chassis_cmd_send.vx = 45.0f * (float)rc_data[TEMP].rc.rocker_r_; // degree/s
+    chassis_cmd_send.vy = 45.0f * (float)rc_data[TEMP].rc.rocker_r1; // degree/s
+    
+    // 左摇杆控制旋转(非小陀螺模式时)
+    if (chassis_cmd_send.chassis_mode != CHASSIS_ROTATE)
+    {
+        int16_t rocker_l = rc_data[TEMP].rc.rocker_l_;
+        if (rocker_l <= 10 && rocker_l >= -10) rocker_l = 0;
+        chassis_cmd_send.wz = -20.0f * (float)rocker_l;
+    }
+
+    chassis_cmd_send.dash_mode = DASH_OFF;
+    chassis_cmd_send.offset_angle = 0;  // 无云台时偏移角固定为0
+    
+#else
+    // ===================== 完整模式 =====================
     // 控制底盘和云台运行模式,云台待添加,云台是否始终使用IMU数据?
     if (switch_is_down(rc_data[TEMP].rc.switch_right)) // 右侧开关状态[下],进入小陀螺模式
     {
@@ -459,6 +497,7 @@ static void RemoteControlSet()
     else
        shoot_cmd_send.lid_mode = LID_CLOSE;
     Limitshoot();
+#endif // CHASSIS_ONLY
 }
 #endif // !USE_IMAGE_REMOTE (RemoteControlSet)
 
@@ -472,7 +511,22 @@ static void RemoteControlSet()
 #ifndef USE_IMAGE_REMOTE
 static void EmergencyHandler()
 {
-
+#ifdef CHASSIS_ONLY
+    // ===================== CHASSIS_ONLY模式: 仅底盘急停处理 =====================
+    if (switch_is_down(rc_data[TEMP].rc.switch_left) || switch_is_mid(rc_data[TEMP].rc.switch_left))
+    {
+        if (robot_state == ROBOT_STOP || !RemoteControlIsOnline())
+        {
+            robot_state = ROBOT_STOP;
+            chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
+        }
+        if (switch_is_mid(rc_data[TEMP].rc.switch_right) && RemoteControlIsOnline())
+        {
+            robot_state = ROBOT_READY;
+        }
+    }
+#else
+    // ===================== 完整模式 =====================
     if (switch_is_down(rc_data[TEMP].rc.switch_left) || switch_is_mid(rc_data[TEMP].rc.switch_left)) // 遥控器左侧开关状态为[下/中],遥控器控制
     {
         if (robot_state == ROBOT_STOP || !RemoteControlIsOnline()) // 还需添加重要应用和模块离线的判断
@@ -508,6 +562,7 @@ static void EmergencyHandler()
     //         shoot_cmd_send.shoot_mode = SHOOT_ON;  // 视觉模式下允许发射
     //     }
     // }
+#endif // CHASSIS_ONLY
     
 }
 #endif // !USE_IMAGE_REMOTE (EmergencyHandler)
@@ -804,12 +859,24 @@ static void ImageEmergencyHandler()
 /* 机器人核心控制任务,200Hz频率运行(必须高于视觉发送频率) */
 void RobotCMDTask()
 {
+#ifdef CHASSIS_ONLY
+    // ===================== CHASSIS_ONLY模式: 仅底盘控制任务 =====================
+    // 获取底盘反馈
+    SubGetMessage(chassis_feed_sub, (void *)&chassis_fetch_data);
+    
+    // 遥控器控制
+    if (switch_is_down(rc_data[TEMP].rc.switch_left) || switch_is_mid(rc_data[TEMP].rc.switch_left))
+        RemoteControlSet();
+    
+    EmergencyHandler();
+    
+    // 发布底盘命令
+    PubPushMessage(chassis_cmd_pub, (void *)&chassis_cmd_send);
 
+#else
+    // ===================== 完整模式 =====================
     chassis_cmd_send.ui_mode = UI_KEEP;
     // 从其他应用获取回传数据
-#ifdef ONE_BOARD
-    SubGetMessage(chassis_feed_sub, (void *)&chassis_fetch_data);
-#endif // ONE_BOARD
 #ifdef GIMBAL_BOARD
     // chassis_fetch_data = *(Chassis_Upload_Data_s *)CANCommGet(cmd_can_comm);
 #endif // GIMBAL_BOARD
@@ -916,9 +983,6 @@ void RobotCMDTask()
 
     // 推送消息,双板通信,视觉通信等
     // 其他应用所需的控制数据在remotecontrolsetmode和mousekeysetmode中完成设置
-#ifdef ONE_BOARD
-    PubPushMessage(chassis_cmd_pub, (void *)&chassis_cmd_send);
-#endif // ONE_BOARD
 #ifdef GIMBAL_BOARD
     CANCommSend(cmd_can_comm, (void *)&chassis_cmd_send);
 #endif // GIMBAL_BOARD
@@ -937,4 +1001,6 @@ void RobotCMDTask()
     if (++sp_send_counter % 2 == 0)  // 100Hz
         VisionSPSend();
 #endif
+
+#endif // CHASSIS_ONLY
 }

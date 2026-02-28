@@ -8,13 +8,16 @@
 #warning check if you have configured the parameters in robot_def.h, IF NOT, please refer to the comments AND DO IT, otherwise the robot will have FATAL ERRORS!!!
 #endif // !ROBOT_DEF_PARAM_WARNING
 
-#if defined(ONE_BOARD) || defined(CHASSIS_BOARD)
+#if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
 #include "chassis.h"
 #endif
 
-#if defined(ONE_BOARD) || defined(GIMBAL_BOARD)
+#ifdef GIMBAL_BOARD
 #include "gimbal.h"
 #include "shoot.h"
+#endif
+
+#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY)
 #include "robot_cmd.h"
 #endif
 
@@ -32,13 +35,16 @@ void RobotInit()
     
     BSPInit();
 
-#if defined(ONE_BOARD) || defined(GIMBAL_BOARD)
+#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY)
     RobotCMDInit();
+#endif
+
+#ifdef GIMBAL_BOARD
     GimbalInit();
     ShootInit();
 #endif
 
-#if defined(ONE_BOARD) || defined(CHASSIS_BOARD)
+#if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
     ChassisInit();
 #endif
 
@@ -53,13 +59,16 @@ void RobotInit()
 void RobotTask()
 {
     
-#if defined(ONE_BOARD) || defined(GIMBAL_BOARD)
+#if defined(GIMBAL_BOARD) || defined(CHASSIS_ONLY)
     RobotCMDTask();
+#endif
+
+#ifdef GIMBAL_BOARD
     GimbalTask();
     ShootTask();
 #endif
 
-#if defined(ONE_BOARD) || defined(CHASSIS_BOARD)
+#if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
     ChassisTask();
 #endif
 

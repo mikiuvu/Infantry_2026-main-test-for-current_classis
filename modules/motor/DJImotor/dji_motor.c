@@ -192,12 +192,12 @@ static void DJIMotorPowerPredict(DJIMotorInstance *motor)
     float speed = motor->measure.speed_aps * DEGREE_2_RAD;  // 转为弧度每秒
     
     // 使用绝对值,功率与方向无关
-    float abs_speed = (speed > 0) ? speed : -speed;
+    // float abs_speed = (speed > 0) ? speed : -speed;
     
-    motor->measure.predicted_power = k0 + k1 * current + k2 * abs_speed 
-                                   + k3 * current * abs_speed 
+    motor->measure.predicted_power = k0 + k1 * current + k2 * speed 
+                                   + k3 * current * speed 
                                    + k4 * current * current 
-                                   + k5 * abs_speed * abs_speed;
+                                   + k5 * speed * speed;
 }
 
 /**
@@ -237,14 +237,14 @@ static void DJIMotorPowerLimit(void)
         {
             float current = dji_motor_powerLimit_3508[i]->measure.real_current * 20.0f / 16384.0f;
             float speed = dji_motor_powerLimit_3508[i]->measure.speed_aps * DEGREE_2_RAD;
-            float abs_speed = (speed > 0) ? speed : -speed;
+            // float abs_speed = (speed > 0) ? speed : -speed;
             
             // a = Σ K4 * I²
             a += k4 * current * current;
             // b = Σ (K1*I + K3*I*ω)
-            b += k1 * current + k3 * current * abs_speed;
+            b += k1 * current + k3 * current * speed;
             // c = Σ (K0 + K2*ω + K5*ω²)
-            c += k0 + k2 * abs_speed + k5 * abs_speed * abs_speed;
+            c += k0 + k2 * speed + k5 * speed * speed;
         }
     }
     
@@ -486,7 +486,7 @@ void DJIMotorControl()
     }
     
     // ==================== 功率限制处理 ====================
-#ifdef CHASSIS_BOARD
+#if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
     // 计算功率限制系数
     DJIMotorPowerLimit();
     

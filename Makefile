@@ -144,6 +144,7 @@ modules/motor/LKmotor/LK9025.c \
 modules/motor/step_motor/step_motor.c \
 modules/motor/servo_motor/servo_motor.c \
 modules/motor/motor_task.c \
+modules/motor_offline_alarm/dji_motor_offline_alarm.c \
 modules/oled/oled.c \
 modules/referee/crc_ref.c \
 modules/referee/rm_referee.c \
@@ -268,6 +269,7 @@ C_INCLUDES =  \
 -Imodules/motor/step_motor \
 -Imodules/motor/servo_motor \
 -Imodules/motor \
+-Imodules/motor_offline_alarm \
 -Imodules/oled \
 -Imodules/referee \
 -Imodules/remote \
