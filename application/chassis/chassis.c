@@ -258,7 +258,7 @@ void ChassisInit()
     chassis_pub = PubRegister("chassis_feed", sizeof(Chassis_Upload_Data_s));
 #endif // CHASSIS_ONLY
 
-    // 底盘电机离线检测配置 (类似PID配置风格)
+    // 底盘电机离线检测配置 
     MotorOfflineAlarmConfig_t chassis_alarm_cfg = {
         .motors = {motor_rf, motor_lb, motor_rb, motor_lf},
         .beep_times = {1, 2, 3, 4},     // RF=1声, LB=2声, RB=3声, LF=4声

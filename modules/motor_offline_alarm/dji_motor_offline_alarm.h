@@ -77,7 +77,7 @@
 
 // 默认参数
 #define ALARM_DEFAULT_CHECK_PERIOD  500   // 默认检测周期 (500次调用)
-#define ALARM_DEFAULT_BEEP_ON_MS    100   // 默认响持续时间
+#define ALARM_DEFAULT_BEEP_ON_MS    50   // 默认响持续时间
 #define ALARM_DEFAULT_BEEP_OFF_MS   150   // 默认间隔时间
 #define ALARM_FREQ_HIGH             2     // 高音调 (云台/发射)
 #define ALARM_FREQ_LOW              8     // 低音调 (底盘)
@@ -90,7 +90,7 @@ typedef struct {
     uint8_t beep_times[MOTOR_GROUP_MAX_SIZE];        // 每个电机对应的蜂鸣次数
     uint8_t motor_count;          // 电机数量 (必填)
     uint16_t check_period;        // 检测周期 (0=使用默认500)
-    uint16_t beep_on_ms;          // 蜂鸣响持续时间 (0=使用默认100ms)
+    uint16_t beep_on_ms;          // 蜂鸣响持续时间 (0=使用默认50ms)
     uint16_t beep_off_ms;         // 蜂鸣间隔时间 (0=使用默认150ms)
     uint8_t buzzer_freq;          // 蜂鸣器音调 (推荐: ALARM_FREQ_HIGH/LOW)
     uint8_t run_buzzer_task;      // 是否执行BuzzerTask (1:主模块, 0:其他模块已调用)

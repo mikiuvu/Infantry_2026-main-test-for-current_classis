@@ -256,7 +256,7 @@ void ShootInit()
 void ShootTask()
 {
     // 电机离线报警: loader=3声, friction_l=4声, friction_r=5声
-    MotorOfflineAlarmTask(shoot_offline_alarm);
+    //MotorOfflineAlarmTask(shoot_offline_alarm);
     
     // 从 cmd获取控制数据
     SubGetMessage(shoot_sub, &shoot_cmd_recv);
