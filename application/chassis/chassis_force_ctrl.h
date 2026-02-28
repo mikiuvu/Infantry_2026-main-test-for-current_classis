@@ -56,10 +56,14 @@
 #define FC_ADAPTIVE_GAMMA        0.00001f   // 自适应增益
 #define FC_ADAPTIVE_I_THRESHOLD  2.0f       // 电流阈值 (A), 低于此值不更新
 
-/* ===================== 滑模控制参数 ===================== */
-#define FC_SMC_LAMBDA            2.0f       // 滑模面斜率
-#define FC_SMC_ETA               50.0f      // 趋近律增益
-#define FC_SMC_PHI               0.3f       // 边界层厚度 (m/s)
+/* ===================== 二阶滑模控制参数 (Super-Twisting) ===================== */
+// Super-Twisting算法: u = -k1*|s|^0.5*sign(s) + v, dv/dt = -k2*sign(s)
+// 稳定性条件: k1 > 0, k2 > 0, 且 k2 > k1^2/(4*k1 + delta)
+#define FC_SMC_LAMBDA            2.0f       // 滑模面斜率 (一阶导数系数)
+#define FC_SMC_K1                80.0f      // Super-Twisting增益k1
+#define FC_SMC_K2                150.0f     // Super-Twisting增益k2 (积分项增益)
+#define FC_SMC_PHI               0.05f      // 边界层厚度 (用于sign函数平滑)
+#define FC_SMC_V_MAX             200.0f     // 积分项最大值限幅 (N)
 
 /* ===================== 扰动观测器参数 ===================== */
 #define FC_DOB_L                 50.0f      // 观测器增益/带宽
@@ -107,14 +111,20 @@ typedef struct {
 } MotorFrictionModel_t;
 
 /**
- * @brief 滑模控制器结构体
+ * @brief 二阶滑模控制器结构体 (Super-Twisting算法)
+ * @note Super-Twisting: u = -k1*|s|^0.5*sign(s) + v, dv/dt = -k2*sign(s)
+ *       实现连续控制输出，天然抑制抖振
  */
 typedef struct {
     float lambda;           // 滑模面斜率
-    float eta;              // 趋近律增益
-    float phi;              // 边界层厚度
+    float st_k1;            // Super-Twisting增益k1 (比例项)
+    float st_k2;            // Super-Twisting增益k2 (积分项)
+    float phi;              // 边界层厚度 (sign函数平滑)
+    float v_integral;       // Super-Twisting积分项状态
+    float v_max;            // 积分项限幅
     float disturbance;      // 估计的扰动 (由DOB提供)
     float v_err_last;       // 上一周期速度误差 (用于微分)
+    float s_last;           // 上一周期滑模面值 (用于调试)
 } SlidingModeCtrl_t;
 
 /**

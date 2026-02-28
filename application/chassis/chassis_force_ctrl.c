@@ -77,20 +77,28 @@ static AdaptiveParam_t adaptive = {
     .gamma = FC_ADAPTIVE_GAMMA,
 };
 
-// 滑模控制器 (X/Y方向各一个)
+// 二阶滑模控制器 (X/Y方向各一个, Super-Twisting算法)
 static SlidingModeCtrl_t smc_vx = {
     .lambda = FC_SMC_LAMBDA,
-    .eta = FC_SMC_ETA,
+    .st_k1 = FC_SMC_K1,
+    .st_k2 = FC_SMC_K2,
     .phi = FC_SMC_PHI,
+    .v_integral = 0.0f,
+    .v_max = FC_SMC_V_MAX,
     .disturbance = 0.0f,
     .v_err_last = 0.0f,
+    .s_last = 0.0f,
 };
 static SlidingModeCtrl_t smc_vy = {
     .lambda = FC_SMC_LAMBDA,
-    .eta = FC_SMC_ETA,
+    .st_k1 = FC_SMC_K1,
+    .st_k2 = FC_SMC_K2,
     .phi = FC_SMC_PHI,
+    .v_integral = 0.0f,
+    .v_max = FC_SMC_V_MAX,
     .disturbance = 0.0f,
     .v_err_last = 0.0f,
+    .s_last = 0.0f,
 };
 
 // 扰动观测器 (X/Y方向各一个)
@@ -177,26 +185,39 @@ static void FrictionAdaptiveLimiter(float *Fx, float *Fy);
 #define CENTER3 ((L + CENTER_GIMBAL_OFFSET_X + CENTER_GIMBAL_OFFSET_Y) * DEGREE_2_RAD)
 #define CENTER4 ((L - CENTER_GIMBAL_OFFSET_X + CENTER_GIMBAL_OFFSET_Y) * DEGREE_2_RAD)
 
-/* ===================== 滑模控制实现 ===================== */
+/* ===================== 二阶滑模控制实现 (Super-Twisting) ===================== */
 
 /**
- * @brief 饱和函数 (边界层法消除抖振)
+ * @brief 平滑符号函数 (边界层法)
+ * @param s 输入值
+ * @param phi 边界层厚度
+ * @return 平滑后的符号值 [-1, 1]
  */
-static float Saturation(float s, float phi)
+static float SmoothSign(float s, float phi)
 {
+    if (phi < 0.001f) phi = 0.001f;  // 防止除零
+    
     if (fabsf(s) < phi) {
-        return s / phi;  // 边界层内线性
+        return s / phi;  // 边界层内线性插值
     } else {
         return (s > 0) ? 1.0f : -1.0f;  // 边界层外饱和
     }
 }
 
 /**
- * @brief 滑模控制器计算
+ * @brief 二阶滑模控制器计算 (Super-Twisting算法)
  * @param smc 控制器实例
  * @param v_err 速度误差 (m/s)
  * @param dt 时间步长 (s)
  * @return 控制力 (N)
+ * 
+ * @note Super-Twisting算法:
+ *       u = u1 + u2 + disturbance
+ *       u1 = -k1 * |s|^0.5 * sign(s)   (比例项, 提供快速收敛)
+ *       u2 = v_integral                 (积分项, 补偿不确定性)
+ *       dv_integral/dt = -k2 * sign(s)  (积分项动态)
+ *       
+ *       优点: 控制输出连续, 天然抑制抖振, 有限时间收敛
  */
 static float SlidingModeControl(SlidingModeCtrl_t *smc, float v_err, float dt)
 {
@@ -209,9 +230,30 @@ static float SlidingModeControl(SlidingModeCtrl_t *smc, float v_err, float dt)
     
     // 滑模面: s = v̇_err + λ * v_err
     float s = v_err_dot + smc->lambda * v_err;
+    smc->s_last = s;  // 保存用于调试
     
-    // 控制律: F = m * (λ * v̇_err + η * sat(s)) + d̂
-    float u = FC_CHASSIS_MASS * (smc->lambda * v_err_dot + smc->eta * Saturation(s, smc->phi));
+    // ======== Super-Twisting算法 ========
+    // 比例项: u1 = -k1 * |s|^0.5 * sign(s)
+    float abs_s = fabsf(s);
+    float sqrt_abs_s = sqrtf(abs_s + 0.0001f);  // 加小量防止数值问题
+    float sign_s = SmoothSign(s, smc->phi);
+    
+    float u1 = -smc->st_k1 * sqrt_abs_s * sign_s;
+    
+    // 积分项动态: dv/dt = -k2 * sign(s)
+    smc->v_integral += -smc->st_k2 * sign_s * dt;
+    
+    // 积分项限幅 (防止积分饱和)
+    if (smc->v_integral > smc->v_max) {
+        smc->v_integral = smc->v_max;
+    } else if (smc->v_integral < -smc->v_max) {
+        smc->v_integral = -smc->v_max;
+    }
+    
+    float u2 = smc->v_integral;
+    
+    // 总控制力: F = m * (u1 + u2) + 扰动补偿
+    float u = FC_CHASSIS_MASS * (u1 + u2);
     
     // 加入扰动补偿 (由DOB提供)
     u += smc->disturbance;
@@ -860,10 +902,14 @@ void ChassisForceCtrlInit(void)
     adaptive.kt_estimate = FC_KT_INITIAL;
     
     smc_vx.lambda = FC_SMC_LAMBDA;
-    smc_vx.eta = FC_SMC_ETA;
+    smc_vx.st_k1 = FC_SMC_K1;
+    smc_vx.st_k2 = FC_SMC_K2;
     smc_vx.phi = FC_SMC_PHI;
+    smc_vx.v_integral = 0;
+    smc_vx.v_max = FC_SMC_V_MAX;
     smc_vx.disturbance = 0;
     smc_vx.v_err_last = 0;
+    smc_vx.s_last = 0;
     
     smc_vy = smc_vx;
     

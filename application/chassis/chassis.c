@@ -26,14 +26,60 @@
 // 速度融合卡尔曼滤波器实例
 static SimpleKalman1D_t kf_vx, kf_vy;
 
+/* ===================== 二阶滑模控制参数 (Super-Twisting) ===================== */
+// Super-Twisting算法: u = -k1*|s|^0.5*sign(s) + v, dv/dt = -k2*sign(s)
+#define SMC_LAMBDA            3.0f       // 滑模面斜率
+#define SMC_K1                60.0f      // Super-Twisting增益k1 (比例项)
+#define SMC_K2                120.0f     // Super-Twisting增益k2 (积分项)
+#define SMC_PHI               0.08f      // 边界层厚度 (sign函数平滑)
+#define SMC_V_MAX             150.0f     // 积分项最大值限幅
+#define SMC_MAX_OUT           8000.0f    // 滑模控制器最大输出 (电流)
+
+// 二阶滑模控制器结构体 (Super-Twisting算法)
+typedef struct {
+    float lambda;           // 滑模面斜率
+    float st_k1;            // Super-Twisting增益k1 (比例项)
+    float st_k2;            // Super-Twisting增益k2 (积分项)
+    float phi;              // 边界层厚度
+    float v_integral;       // Super-Twisting积分项状态
+    float v_max;            // 积分项限幅
+    float disturbance;      // 估计的扰动 (由DOB提供)
+    float v_err_last;       // 上一周期速度误差 (用于微分)
+    float s_last;           // 上一周期滑模面值 (调试用)
+} SMC_Controller_t;
+
+/* ===================== 扩展状态观测器参数 (ESO) ===================== */
+// LESO参数: 只需调整带宽ω0，观测器增益自动计算
+// β1 = 2*ω0, β2 = ω0² (极点配置法)
+#define ESO_OMEGA0            50.0f      // ESO带宽 (核心参数, 越大响应越快但噪声敏感)
+#define ESO_B0                1.0f       // 控制增益 (归一化为1, 简化调参)
+#define ESO_D_MAX             5000.0f    // 最大扰动估计限幅 (电流单位)
+
+// 扩展状态观测器结构体 (LESO - 线性ESO)
+typedef struct {
+    float z1;               // 状态估计 (速度)
+    float z2;               // 总扰动估计 (包含模型不确定性+外部扰动)
+    float omega0;           // 观测器带宽
+    float beta1;            // 观测器增益1 (= 2*ω0)
+    float beta2;            // 观测器增益2 (= ω0²)
+    float b0;               // 控制增益
+} ESO_t;
+
+// X/Y方向滑模控制器和ESO
+static SMC_Controller_t smc_vx = {0};
+static SMC_Controller_t smc_vy = {0};
+static ESO_t eso_x = {0};
+static ESO_t eso_y = {0};
+
 /* ===================== 打滑检测与牵引力控制 ===================== */
-// 单轮打滑检测结构
+// 单轮打滑检测结构 (基于加速度的方法，解决循环依赖)
 typedef struct {
     uint8_t is_slipping;     // 是否打滑
-    float deviation;         // 实际轮速与期望轮速的偏差 (mm/s)
+    float deviation;         // 打滑指标 (mm/s)
     float tcs_factor;        // 该轮的TCS系数 
-    float expected_speed;    // 期望轮速 (根据融合速度计算)
-    float actual_speed;      // 实际轮速
+    float expected_dv;       // 期望速度变化 (IMU预测)
+    float actual_dv;         // 实际速度变化 (轮速差分)
+    float last_speed;        // 上一帧轮速 (mm/s)
 } WheelSlip_t;
 
 // 轮子索引定义
@@ -44,12 +90,11 @@ typedef struct {
 
 static WheelSlip_t wheel_slip[4] = {0};
 
-// TCS参数 (滑移率控制)
-#define TCS_TARGET_SLIP_RATIO    0.20f   // 目标滑移率上限 (20%)
-#define TCS_SLIP_DEADBAND        0.10f   // 滑移率死区 (10%)，低于此值不干预
+// TCS参数 (基于加速度差异的打滑检测)
+#define TCS_SLIP_THRESHOLD       30.0f   // 打滑判定阈值 (mm/s 速度变化差)
 #define TCS_MIN_FACTOR           0.3f    // TCS最小输出系数
-#define TCS_RECOVERY_RATE        0.008f  // TCS恢复速率 (每周期, 500Hz)
-#define TCS_RESPONSE_GAIN        4.0f    // 滑移率超限时的响应增益
+#define TCS_RECOVERY_RATE        0.01f   // TCS恢复速率 (每周期)
+#define TCS_RESPONSE_GAIN        0.015f  // 打滑时的响应增益
 /* ===================== VOFA可调参数 ===================== */
 // IMU安装偏移 
 static float imu_offset_x = CHASSIS_IMU_OFFSET_X;  // X方向偏移 (mm)
@@ -61,14 +106,16 @@ static float current_ff_rf = 0.0f;
 static float current_ff_lb = 0.0f;
 static float current_ff_rb = 0.0f;
 
-// 全局观测器计算的补偿力
-static float global_Fx = 0.0f;  // X方向补偿力 (N)
-static float global_Fy = 0.0f;  // Y方向补偿力 (N)
-static float global_Mz = 0.0f;  // 旋转补偿力矩 (N*m)
+// 全局观测器计算的补偿电流 (X/Y方向)
+static float global_Ix = 0.0f;  // X方向补偿电流
+static float global_Iy = 0.0f;  // Y方向补偿电流
+static float global_Iwz = 0.0f; // 旋转补偿电流
 
-/* ===================== 单轮补偿PID ===================== */
-// 各轮独立的速度误差补偿PID (期望轮速 vs 实际轮速)
-static PIDInstance wheel_ff_pid[4];  // LF, RF, LB, RB
+// 上一周期的补偿电流 (用于DOB)
+static float last_Ix = 0.0f;
+static float last_Iy = 0.0f;
+
+/* ===================== SMC+DOB 控制 ===================== */
 static uint8_t observer_inited = 0;
 
 // 超电重启冷却时间 (500*2ms=1s)
@@ -212,20 +259,30 @@ void ChassisInit()
     SimpleKalman1D_Init(&kf_vx, 0.1f, 0.8f, 0.0f);
     SimpleKalman1D_Init(&kf_vy, 0.1f, 0.8f, 0.0f);
     
-    // 初始化单轮补偿PID (速度误差 -> 电流补偿)
-    // 用于：期望轮速 vs 实际轮速 -> 补偿电流
-    PID_Init_Config_s wheel_ff_pid_conf = {
-        .Kp = 5.0f,
-        .Ki = 0.5f,
-        .Kd = 0.1f,
-        .MaxOut = 3000.0f,  // 最大补偿电流
-        .IntegralLimit = 1000.0f,
-        .DeadBand = 10.0f,  // 死区 10mm/s
-        .Improve = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-    };
-    for (int i = 0; i < 4; i++) {
-        PIDInit(&wheel_ff_pid[i], &wheel_ff_pid_conf);
-    }
+    // 初始化二阶滑模控制器 (Super-Twisting算法)
+    smc_vx.lambda = SMC_LAMBDA;
+    smc_vx.st_k1 = SMC_K1;
+    smc_vx.st_k2 = SMC_K2;
+    smc_vx.phi = SMC_PHI;
+    smc_vx.v_integral = 0;
+    smc_vx.v_max = SMC_V_MAX;
+    smc_vx.disturbance = 0;
+    smc_vx.v_err_last = 0;
+    smc_vx.s_last = 0;
+    
+    smc_vy = smc_vx;  // Y方向使用相同参数
+    
+    // 初始化扩展状态观测器 (ESO)
+    // 增益配置: β1 = 2*ω0, β2 = ω0² (极点配置法)
+    eso_x.omega0 = ESO_OMEGA0;
+    eso_x.beta1 = 2.0f * ESO_OMEGA0;
+    eso_x.beta2 = ESO_OMEGA0 * ESO_OMEGA0;
+    eso_x.b0 = ESO_B0;
+    eso_x.z1 = 0;
+    eso_x.z2 = 0;
+    
+    eso_y = eso_x;  // Y方向使用相同参数
+    
     // 标记观测器初始化完成
     observer_inited = 1;
     
@@ -290,63 +347,160 @@ static void MecanumCalculate()
 }
 
 /**
- * @brief 全局观测器: 根据融合速度与目标速度的误差计算补偿力矩
- *        补偿力矩通过电流前馈作用于电机
+ * @brief 平滑符号函数 (边界层法)
+ * @param s 输入值
+ * @param phi 边界层厚度
+ * @return 平滑后的符号值 [-1, 1]
+ */
+static float SmoothSign(float s, float phi)
+{
+    if (phi < 0.001f) phi = 0.001f;
+    if (fabsf(s) < phi) {
+        return s / phi;
+    } else {
+        return (s > 0) ? 1.0f : -1.0f;
+    }
+}
+
+/**
+ * @brief 二阶滑模控制器计算 (Super-Twisting算法)
+ * @param smc 控制器实例
+ * @param v_err 速度误差 (mm/s)
+ * @param dt 时间步长 (s)
+ * @return 补偿电流
+ */
+static float SMC_Calculate(SMC_Controller_t *smc, float v_err, float dt)
+{
+    // 速度误差导数 (数值微分)
+    float v_err_dot = 0.0f;
+    if (dt > 0.0001f) {
+        v_err_dot = (v_err - smc->v_err_last) / dt;
+    }
+    smc->v_err_last = v_err;
+    
+    // 滑模面: s = v̇_err + λ * v_err
+    float s = v_err_dot + smc->lambda * v_err;
+    smc->s_last = s;
+    
+    // Super-Twisting算法
+    // 比例项: u1 = -k1 * |s|^0.5 * sign(s)
+    float abs_s = fabsf(s);
+    float sqrt_abs_s = sqrtf(abs_s + 0.0001f);
+    float sign_s = SmoothSign(s, smc->phi);
+    
+    float u1 = -smc->st_k1 * sqrt_abs_s * sign_s;
+    
+    // 积分项动态: dv/dt = -k2 * sign(s)
+    smc->v_integral += -smc->st_k2 * sign_s * dt;
+    
+    // 积分项限幅
+    if (smc->v_integral > smc->v_max) {
+        smc->v_integral = smc->v_max;
+    } else if (smc->v_integral < -smc->v_max) {
+        smc->v_integral = -smc->v_max;
+    }
+    
+    float u2 = smc->v_integral;
+    
+    // 总控制输出 + 扰动补偿
+    float u = u1 + u2 + smc->disturbance;
+    
+    // 限幅
+    if (u > SMC_MAX_OUT) u = SMC_MAX_OUT;
+    else if (u < -SMC_MAX_OUT) u = -SMC_MAX_OUT;
+    
+    return u;
+}
+
+/**
+ * @brief 扩展状态观测器更新 (LESO - 线性ESO)
+ * @param eso 观测器实例
+ * @param y 测量速度 (mm/s)
+ * @param u 控制输入 (电流)
+ * @param dt 时间步长 (s)
+ * @return 总扰动估计
  * 
- * 控制架构 (单轮独立补偿):
+ * @note ESO状态方程:
+ *       e = z1 - y
+ *       ż1 = z2 - β1*e + b0*u
+ *       ż2 = -β2*e
+ *       
+ *       优点: 
+ *       1. 不需要精确模型，将所有不确定性视为“总扰动”
+ *       2. 只需调一个参数ω0 (带宽)
+ *       3. 同时估计状态和扰动
+ */
+static float ESO_Update(ESO_t *eso, float y, float u, float dt)
+{
+    // 观测误差
+    float e = eso->z1 - y;
+    
+    // ESO状态更新
+    // ż1 = z2 - β1*e + b0*u
+    float z1_dot = eso->z2 - eso->beta1 * e + eso->b0 * u;
+    // ż2 = -β2*e
+    float z2_dot = -eso->beta2 * e;
+    
+    // 欧拉积分
+    eso->z1 += z1_dot * dt;
+    eso->z2 += z2_dot * dt;
+    
+    // 扰动估计限幅 (防止发散)
+    if (eso->z2 > ESO_D_MAX) eso->z2 = ESO_D_MAX;
+    else if (eso->z2 < -ESO_D_MAX) eso->z2 = -ESO_D_MAX;
+    
+    return eso->z2;  // 返回总扰动估计
+}
+
+/**
+ * @brief 全局观测器: 二阶滑模控制 + 扩展状态观测器(ESO)
+ * 
+ * 控制架构:
  *    目标速度 ──> 逆运动学 ──> 各轮目标速度 ──> 电机速度环 ──┬──> 电机电流环 ──> 输出
  *                                                        │
- *    融合速度 ──> 逆运动学 ──> 各轮期望速度 ──┐             │
- *                                          ├─> 单轮PID ──> 电流前馈 ──────┘
- *    各轮实际速度 ─────────────────────────┘
- * 
+ *    速度误差 ──> SMC(Super-Twisting) + ESO ──> 电流前馈 ──┘
  */
-static void GlobalObserverCalculate()
+static void GlobalObserverCalculate(float dt)
 {
 #if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
     if (!observer_inited) return;
     
-    // ==================== 单轮独立补偿 ====================
-    // 使用打滑检测中已计算的期望轮速和实际轮速
-    // expected_speed: 根据融合速度(IMU+轮速)计算的期望轮速
-    // actual_speed: 电机反馈的实际轮速
+    // ==================== 获取速度误差 ====================
+    // 目标速度 (从MecanumCalculate算出的电机角速度 -> 轮子线速度 mm/s)
+    float target_vx_wheel = chassis_vx * 10 * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
+    float target_vy_wheel = chassis_vy * 10 * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
     
-    // 判断是否为卡住状态 (期望 > 实际)
-    // 卡住: 期望 > 实际 → 需要PID补偿
-    // 空转: 期望 < 实际 → 不补偿(由TCS降低)
-    uint8_t is_stuck[4];
-    is_stuck[WHEEL_LF] = (wheel_slip[WHEEL_LF].expected_speed > wheel_slip[WHEEL_LF].actual_speed);
-    is_stuck[WHEEL_RF] = (wheel_slip[WHEEL_RF].expected_speed > wheel_slip[WHEEL_RF].actual_speed);
-    is_stuck[WHEEL_LB] = (wheel_slip[WHEEL_LB].expected_speed > wheel_slip[WHEEL_LB].actual_speed);
-    is_stuck[WHEEL_RB] = (wheel_slip[WHEEL_RB].expected_speed > wheel_slip[WHEEL_RB].actual_speed);
+    // 实际速度 (融合后的底盘速度 mm/s)
+    float actual_vx = chassis_feedback_data.real_vx;
+    float actual_vy = chassis_feedback_data.real_vy;
     
-    // 使用PID计算补偿电流 (PIDCalculate自带限幅)
-    // 注意: PIDCalculate(pid, measure, ref) = ref - measure 的PID输出
-    float ff_lf = PIDCalculate(&wheel_ff_pid[WHEEL_LF], 
-                               wheel_slip[WHEEL_LF].actual_speed,
-                               wheel_slip[WHEEL_LF].expected_speed);
-    float ff_rf = PIDCalculate(&wheel_ff_pid[WHEEL_RF],
-                               wheel_slip[WHEEL_RF].actual_speed,
-                               wheel_slip[WHEEL_RF].expected_speed);
-    float ff_lb = PIDCalculate(&wheel_ff_pid[WHEEL_LB],
-                               wheel_slip[WHEEL_LB].actual_speed,
-                               wheel_slip[WHEEL_LB].expected_speed);
-    float ff_rb = PIDCalculate(&wheel_ff_pid[WHEEL_RB],
-                               wheel_slip[WHEEL_RB].actual_speed,
-                               wheel_slip[WHEEL_RB].expected_speed);
+    // 速度误差
+    float vx_err = target_vx_wheel - actual_vx;
+    float vy_err = target_vy_wheel - actual_vy;
     
-    // 只对"卡住"方向补偿，空转由TCS处理
-    // 卡住时保留正向补偿，空转时清零
-    ff_lf = is_stuck[WHEEL_LF] ? fmaxf(ff_lf, 0.0f) : 0.0f;
-    ff_rf = is_stuck[WHEEL_RF] ? fmaxf(ff_rf, 0.0f) : 0.0f;
-    ff_lb = is_stuck[WHEEL_LB] ? fmaxf(ff_lb, 0.0f) : 0.0f;
-    ff_rb = is_stuck[WHEEL_RB] ? fmaxf(ff_rb, 0.0f) : 0.0f;
+    // ==================== 更新ESO ====================
+    // 使用上一周期的控制量更新扰动估计
+    float dx = ESO_Update(&eso_x, actual_vx, last_Ix, dt);
+    float dy = ESO_Update(&eso_y, actual_vy, last_Iy, dt);
     
-    // 应用力补偿
-    current_ff_lf = ff_lf;
-    current_ff_rf = ff_rf;
-    current_ff_lb = ff_lb;
-    current_ff_rb = ff_rb;
+    // 将扰动补偿传给滑模控制器 (负号: 补偿要抵消扰动)
+    smc_vx.disturbance = -dx;
+    smc_vy.disturbance = -dy;
+    
+    // ==================== SMC计算 ====================
+    global_Ix = SMC_Calculate(&smc_vx, vx_err, dt);
+    global_Iy = SMC_Calculate(&smc_vy, vy_err, dt);
+    
+    // 保存本周期控制量供下次ESO使用
+    last_Ix = global_Ix;
+    last_Iy = global_Iy;
+    
+    // ==================== 分配到各轮 ====================
+    // 逆运动学: XY方向电流 -> 各轮电流前馈
+    current_ff_lf = (-global_Ix - global_Iy) / (2.0f * Sqrt(2));
+    current_ff_rf = ( global_Ix - global_Iy) / (2.0f * Sqrt(2));
+    current_ff_lb = (-global_Ix + global_Iy) / (2.0f * Sqrt(2));
+    current_ff_rb = ( global_Ix + global_Iy) / (2.0f * Sqrt(2));
     
 #else
     // 无IMU模式
@@ -442,10 +596,11 @@ static void LimitChassisOutput()
 
 /**
  * @brief 速度估计与打滑检测 (混合控制模式)
- *        使用轮速与融合速度的偏差来检测打滑
+ *        使用基于加速度的打滑检测，解决循环依赖问题
  * @note 内部计算使用 mm/s (轮子线速度) 进行融合和打滑检测
+ * @return 时间步长dt (s)
  */
-static void EstimateSpeed()
+static float EstimateSpeed()
 {
     // 获取四个轮子的线速度: 电机角速度(degree/s) -> 轮子线速度(mm/s)
     float wheel_lf = motor_lf->measure.speed_aps * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
@@ -517,82 +672,69 @@ static void EstimateSpeed()
     chassis_feedback_data.real_vx = SimpleKalman1D_Update(&kf_vx, imu_accel_x, wheel_vx, dt);
     chassis_feedback_data.real_vy = SimpleKalman1D_Update(&kf_vy, imu_accel_y, wheel_vy, dt);
     
-    // ==================== 单轮打滑检测 ====================
-    // 原理: 根据融合速度计算每个轮子的期望速度，与实际轮速对比
-    // 如果某个轮子偏差大，则认为该轮打滑
+    // ==================== 基于加速度的打滑检测 (解决循环依赖) ====================
+    // 原理: 用IMU加速度直接预测各轮期望速度变化，与实际轮速变化对比
+    // 优点: 不依赖融合速度，打破 融合速度->打滑检测->卡尔曼R->融合速度 的循环
     
-    // 使用融合速度和IMU角速度计算期望轮速 (逆运动学)
-    float real_vx = chassis_feedback_data.real_vx;  // 融合速度 (mm/s)
-    float real_vy = chassis_feedback_data.real_vy;  // 融合速度 (mm/s)
-    float real_wz = omega_yaw;  // 使用IMU角速度 (rad/s) 用轮速计算的怎么样？
+    // 1. 用IMU加速度预测底盘速度变化 (mm/s)
+    float dv_x = imu_accel_x * dt;  // 底盘X方向速度变化
+    float dv_y = imu_accel_y * dt;  // 底盘Y方向速度变化
+    float dv_wz = alpha_yaw * dt;   // 角速度变化
     
-    // 期望轮速计算 (X型全向轮逆运动学) - 单位: mm/s (轮子线速度)
-    float expected_lf = (-real_vx - real_vy) / Sqrt(2) + real_wz * L;
-    float expected_rf = (real_vx - real_vy) / Sqrt(2) - real_wz * L;
-    float expected_lb = (-real_vx + real_vy) / Sqrt(2) - real_wz * L;
-    float expected_rb = (real_vx + real_vy) / Sqrt(2) + real_wz * L;
+    // 2. 逆运动学: 底盘速度变化 → 各轮期望速度变化 (mm/s)
+    float expected_dv_lf = (-dv_x - dv_y) / Sqrt(2) + dv_wz * L;
+    float expected_dv_rf = ( dv_x - dv_y) / Sqrt(2) - dv_wz * L;
+    float expected_dv_lb = (-dv_x + dv_y) / Sqrt(2) - dv_wz * L;
+    float expected_dv_rb = ( dv_x + dv_y) / Sqrt(2) + dv_wz * L;
     
-    // 实际轮速 (mm/s)
-    wheel_slip[WHEEL_LF].actual_speed = wheel_lf;
-    wheel_slip[WHEEL_RF].actual_speed = wheel_rf;
-    wheel_slip[WHEEL_LB].actual_speed = wheel_lb;
-    wheel_slip[WHEEL_RB].actual_speed = wheel_rb;
+    // 3. 实际轮速变化 (当前 - 上一帧)
+    float actual_dv_lf = wheel_lf - wheel_slip[WHEEL_LF].last_speed;
+    float actual_dv_rf = wheel_rf - wheel_slip[WHEEL_RF].last_speed;
+    float actual_dv_lb = wheel_lb - wheel_slip[WHEEL_LB].last_speed;
+    float actual_dv_rb = wheel_rb - wheel_slip[WHEEL_RB].last_speed;
     
-    wheel_slip[WHEEL_LF].expected_speed = expected_lf;
-    wheel_slip[WHEEL_RF].expected_speed = expected_rf;
-    wheel_slip[WHEEL_LB].expected_speed = expected_lb;
-    wheel_slip[WHEEL_RB].expected_speed = expected_rb;
+    // 保存当前轮速供下次使用
+    wheel_slip[WHEEL_LF].last_speed = wheel_lf;
+    wheel_slip[WHEEL_RF].last_speed = wheel_rf;
+    wheel_slip[WHEEL_LB].last_speed = wheel_lb;
+    wheel_slip[WHEEL_RB].last_speed = wheel_rb;
     
-    // 单轮滑移率检测与TCS控制
-    // 目标: 限制滑移率不超过 TCS_TARGET_SLIP_RATIO (20%)
+    // 4. 打滑检测: 比较期望速度变化与实际速度变化
+    float expected_dv[4] = {expected_dv_lf, expected_dv_rf, expected_dv_lb, expected_dv_rb};
+    float actual_dv[4] = {actual_dv_lf, actual_dv_rf, actual_dv_lb, actual_dv_rb};
+    float wheel_speeds[4] = {wheel_lf, wheel_rf, wheel_lb, wheel_rb};
+    
     uint8_t any_wheel_slipping = 0;
-    float wheel_actual[4] = {wheel_lf, wheel_rf, wheel_lb, wheel_rb};
-    float wheel_expected[4] = {expected_lf, expected_rf, expected_lb, expected_rb};
-    
     for (int i = 0; i < 4; i++) {
-        float actual_abs = fabsf(wheel_actual[i]);
-        float expected_abs = fabsf(wheel_expected[i]);
+        wheel_slip[i].expected_dv = expected_dv[i];
+        wheel_slip[i].actual_dv = actual_dv[i];
         
-        // 计算滑移率: slip_ratio = (|actual| - |expected|) / |actual|
-        // 正值表示空转(打滑)，负值表示卡住
-        float slip_ratio = 0.0f;
-        if (actual_abs > 50.0f) {  // 避免低速时除零和噪声
-            slip_ratio = (actual_abs - expected_abs) / actual_abs;
-        }
+        // 打滑指标: 期望与实际速度变化的差异
+        float slip_indicator = fabsf(actual_dv[i] - expected_dv[i]);
+        wheel_slip[i].deviation = slip_indicator;
         
-        // 保存偏差用于调试
-        wheel_slip[i].deviation = slip_ratio * 100.0f;  // 转为百分比
+        // 打滑判定: 差异超过阈值且轮速足够大(避免静止时误判)
+        float wheel_speed_abs = fabsf(wheel_speeds[i]);
         
-        // 判断是否需要TCS干预
-        // 只在空转(slip_ratio > 0)且超过死区时干预
-        if (slip_ratio > TCS_SLIP_DEADBAND) {
+        if (slip_indicator > TCS_SLIP_THRESHOLD && wheel_speed_abs > 100.0f) {
             wheel_slip[i].is_slipping = 1;
             any_wheel_slipping = 1;
             
-            // 超过目标滑移率时，降低tcs_factor
-            if (slip_ratio > TCS_TARGET_SLIP_RATIO) {
-                // 超限量越大，降低越多
-                float excess = slip_ratio - TCS_TARGET_SLIP_RATIO;
-                float reduction = excess * TCS_RESPONSE_GAIN;
-                wheel_slip[i].tcs_factor = fmaxf(1.0f - reduction, TCS_MIN_FACTOR);
-            } else {
-                // 在死区和目标之间，逐渐恢复
-                if (wheel_slip[i].tcs_factor < 1.0f) {
-                    wheel_slip[i].tcs_factor += TCS_RECOVERY_RATE;
-                    if (wheel_slip[i].tcs_factor > 1.0f)
-                        wheel_slip[i].tcs_factor = 1.0f;
-                }
+            // 降低tcs_factor
+            float reduction = slip_indicator * TCS_RESPONSE_GAIN;
+            wheel_slip[i].tcs_factor -= reduction;
+            if (wheel_slip[i].tcs_factor < TCS_MIN_FACTOR) {
+                wheel_slip[i].tcs_factor = TCS_MIN_FACTOR;
             }
-        } 
-        else {
-            // 滑移率在死区内或卡住状态，不干预
+        } else {
             wheel_slip[i].is_slipping = 0;
             
             // 逐渐恢复tcs_factor
             if (wheel_slip[i].tcs_factor < 1.0f) {
                 wheel_slip[i].tcs_factor += TCS_RECOVERY_RATE;
-                if (wheel_slip[i].tcs_factor > 1.0f) 
+                if (wheel_slip[i].tcs_factor > 1.0f) {
                     wheel_slip[i].tcs_factor = 1.0f;
+                }
             }
         }
     }
@@ -619,9 +761,12 @@ static void EstimateSpeed()
         kf_vx.R = 0.8f;
         kf_vy.R = 0.8f;
     }
+    
+    return dt;
 #else
     chassis_feedback_data.real_vx = wheel_vx;
     chassis_feedback_data.real_vy = wheel_vy;
+    return 0.002f;  // 默认时间步长
 #endif
 }
 /* 机器人底盘控制核心任务 */
@@ -687,13 +832,13 @@ void ChassisTask()
 
     // 先计算真实速度(用于速度外环和打滑检测)
     // 注意: 必须在GlobalObserverCalculate之前调用!
-    EstimateSpeed();
+    float dt = EstimateSpeed();
     
     // 计算各轮目标速度 (送入电机速度环)
     MecanumCalculate();
     
     // 全局观测器计算前馈补偿 (送入电机电流前馈)
-    GlobalObserverCalculate();
+    GlobalObserverCalculate(dt);
 
     // 设置电机参考值
     LimitChassisOutput();
