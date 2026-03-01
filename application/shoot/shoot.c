@@ -295,14 +295,18 @@ void ShootTask()
         //     DJIMotorSetRef(friction_r, 40000);
         //     break;
         // } 
-
+        DJIMotorOuterLoop(friction_l, SPEED_LOOP);
+        DJIMotorOuterLoop(friction_r, SPEED_LOOP);
         DJIMotorSetRef(friction_l, 5000);//40000
         DJIMotorSetRef(friction_r, 5000);
     }
-    else // 关闭摩擦轮/
+    else // 关闭摩擦轮
     {
+        DJIMotorOuterLoop(friction_l, CURRENT_LOOP);
+        DJIMotorOuterLoop(friction_r, CURRENT_LOOP);
         DJIMotorSetRef(friction_l, 0);
         DJIMotorSetRef(friction_r, 0);
+
     }
     // 如果上一次触发单发或3发指令的时间加上不应期仍然大于当前时间(尚未休眠完毕),直接返回即可
     // 单发模式主要提供给能量机关激活使用(以及英雄的射击大部分处于单发)

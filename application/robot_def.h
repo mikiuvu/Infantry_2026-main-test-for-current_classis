@@ -56,7 +56,7 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD 2730  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
+#define YAW_CHASSIS_ALIGN_ECD 1350  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
 //#define YAW_CHASSIS_ALIGN_ECD 2030  //步兵二
 #define YAW_ECD_GREATER_THAN_4096 0 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
@@ -121,9 +121,12 @@
 
 /* ======================== 云台前馈参数 ======================== */
 // 前馈在gimbal中本地计算
+// 速度前馈系数 (目标角速度 * 系数 = 速度前馈输出)
+#define YAW_SPEED_FF_COEF       1.0f     // yaw速度前馈系数
+#define PITCH_SPEED_FF_COEF     1.0f     // pitch速度前馈系数 
 // 加速度-电流转换系数
-#define YAW_ACC_TO_CURRENT      1.0f    // yaw加速度(°/s²)转电流系数
-#define PITCH_ACC_TO_CURRENT    1.0f    // pitch加速度(°/s²)转电流系数
+#define YAW_ACC_TO_CURRENT      0.05f    // yaw加速度(°/s²)转电流系数
+#define PITCH_ACC_TO_CURRENT    0.05f    // pitch加速度(°/s²)转电流系数
 
 /* ======================== Pitch重力补偿参数 ======================== */
 #define GRAVITY_COMP_MAX        -9200.0f  // 最大重力补偿电流值(水平时)

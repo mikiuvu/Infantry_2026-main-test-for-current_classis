@@ -29,11 +29,11 @@ static SimpleKalman1D_t kf_vx, kf_vy;
 /* ===================== 二阶滑模控制参数 (Super-Twisting) ===================== */
 // Super-Twisting算法: u = -k1*|s|^0.5*sign(s) + v, dv/dt = -k2*sign(s)
 #define SMC_LAMBDA            3.0f       // 滑模面斜率
-#define SMC_K1                60.0f      // Super-Twisting增益k1 (比例项)
-#define SMC_K2                120.0f     // Super-Twisting增益k2 (积分项)
-#define SMC_PHI               0.08f      // 边界层厚度 (sign函数平滑)
+#define SMC_K1                30.0f      // Super-Twisting增益k1 (比例项)
+#define SMC_K2                60.0f     // Super-Twisting增益k2 (积分项)
+#define SMC_PHI               0.03f      // 边界层厚度 (sign函数平滑)
 #define SMC_V_MAX             150.0f     // 积分项最大值限幅
-#define SMC_MAX_OUT           8000.0f    // 滑模控制器最大输出 (电流)
+#define SMC_MAX_OUT           0.0f    // 滑模控制器最大输出 (电流)
 
 // 二阶滑模控制器结构体 (Super-Twisting算法)
 typedef struct {
@@ -51,9 +51,9 @@ typedef struct {
 /* ===================== 扩展状态观测器参数 (ESO) ===================== */
 // LESO参数: 只需调整带宽ω0，观测器增益自动计算
 // β1 = 2*ω0, β2 = ω0² (极点配置法)
-#define ESO_OMEGA0            50.0f      // ESO带宽 (核心参数, 越大响应越快但噪声敏感)
+#define ESO_OMEGA0            20.0f      // ESO带宽 (核心参数, 越大响应越快但噪声敏感)
 #define ESO_B0                1.0f       // 控制增益 (归一化为1, 简化调参)
-#define ESO_D_MAX             5000.0f    // 最大扰动估计限幅 (电流单位)
+#define ESO_D_MAX             0.0f    // 最大扰动估计限幅 (电流单位) 5000
 
 // 扩展状态观测器结构体 (LESO - 线性ESO)
 typedef struct {
@@ -76,7 +76,6 @@ static ESO_t eso_y = {0};
 typedef struct {
     uint8_t is_slipping;     // 是否打滑
     float deviation;         // 打滑指标 (mm/s)
-    float tcs_factor;        // 该轮的TCS系数 
     float expected_dv;       // 期望速度变化 (IMU预测)
     float actual_dv;         // 实际速度变化 (轮速差分)
     float last_speed;        // 上一帧轮速 (mm/s)
@@ -90,11 +89,8 @@ typedef struct {
 
 static WheelSlip_t wheel_slip[4] = {0};
 
-// TCS参数 (基于加速度差异的打滑检测)
+// TCS参数 (基于加速度差异的打滑检测，仅用于调整卡尔曼R)
 #define TCS_SLIP_THRESHOLD       30.0f   // 打滑判定阈值 (mm/s 速度变化差)
-#define TCS_MIN_FACTOR           0.3f    // TCS最小输出系数
-#define TCS_RECOVERY_RATE        0.01f   // TCS恢复速率 (每周期)
-#define TCS_RESPONSE_GAIN        0.015f  // 打滑时的响应增益
 /* ===================== VOFA可调参数 ===================== */
 // IMU安装偏移 
 static float imu_offset_x = CHASSIS_IMU_OFFSET_X;  // X方向偏移 (mm)
@@ -117,6 +113,10 @@ static float last_Iy = 0.0f;
 
 /* ===================== SMC+DOB 控制 ===================== */
 static uint8_t observer_inited = 0;
+
+// 静止检测: 用于清零SMC和ESO状态
+#define SMC_ESO_RESET_THRESHOLD  30   // 静止检测阈值 (30*2ms=60ms)
+static uint32_t zero_input_cnt = 0;    // 零输入计数器
 
 // 超电重启冷却时间 (500*2ms=1s)
 #define CAP_RESTART_COOLDOWN 2000
@@ -286,9 +286,8 @@ void ChassisInit()
     // 标记观测器初始化完成
     observer_inited = 1;
     
-    // 初始化单轮TCS系数
+    // 初始化打滑检测状态
     for (int i = 0; i < 4; i++) {
-        wheel_slip[i].tcs_factor = 1.0f;
         wheel_slip[i].is_slipping = 0;
     }
     
@@ -337,8 +336,6 @@ void ChassisInit()
  */
 static void MecanumCalculate()
 {   
-    chassis_vx*=10;
-    chassis_vy*=10;
     // X型全向轮逆运动学: 底盘速度 -> 各轮速度 (单位: degree/s)
     vt_lf = (-chassis_vx - chassis_vy) / Sqrt(2) + chassis_cmd_recv.wz * CENTER2;
     vt_rf = (chassis_vx - chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER1;
@@ -460,15 +457,63 @@ static float ESO_Update(ESO_t *eso, float y, float u, float dt)
  *                                                        │
  *    速度误差 ──> SMC(Super-Twisting) + ESO ──> 电流前馈 ──┘
  */
+/**
+ * @brief 重置SMC和ESO状态 (静止时调用)
+ */
+static void ResetSMC_ESO(void)
+{
+    // 重置SMC积分和状态
+    smc_vx.v_integral = 0;
+    smc_vx.v_err_last = 0;
+    smc_vx.s_last = 0;
+    smc_vx.disturbance = 0;
+    
+    smc_vy.v_integral = 0;
+    smc_vy.v_err_last = 0;
+    smc_vy.s_last = 0;
+    smc_vy.disturbance = 0;
+    
+    // 重置ESO状态
+    eso_x.z1 = 0;
+    eso_x.z2 = 0;
+    eso_y.z1 = 0;
+    eso_y.z2 = 0;
+    
+    // 重置输出
+    global_Ix = 0;
+    global_Iy = 0;
+    last_Ix = 0;
+    last_Iy = 0;
+    
+    // 重置前馈
+    current_ff_lf = 0;
+    current_ff_rf = 0;
+    current_ff_lb = 0;
+    current_ff_rb = 0;
+}
+
 static void GlobalObserverCalculate(float dt)
 {
 #if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
     if (!observer_inited) return;
     
-    // ==================== 获取速度误差 ====================
-    // 目标速度 (从MecanumCalculate算出的电机角速度 -> 轮子线速度 mm/s)
-    float target_vx_wheel = chassis_vx * 10 * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
-    float target_vy_wheel = chassis_vy * 10 * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
+    // ==================== 静止检测: 清零SMC和ESO ====================
+    // 当遥控器vx/vy都接近0时开始计数，达到阈值后重置状态
+    if (fabsf(chassis_cmd_recv.vx) < 10.0f && fabsf(chassis_cmd_recv.vy) < 10.0f) {
+        zero_input_cnt++;
+        if (zero_input_cnt >= SMC_ESO_RESET_THRESHOLD) {
+            ResetSMC_ESO();
+            zero_input_cnt = SMC_ESO_RESET_THRESHOLD;  // 防止溢出
+            return;  // 静止时不计算
+        }
+    } else {
+        zero_input_cnt = 0;  // 有输入时重置计数器
+    }
+    
+    // ==================== 获取速度误差 ==
+    // 目标速度 (底盘速度 -> 轮子线速度 mm/s)
+    float target_vx_wheel = chassis_vx * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
+    float target_vy_wheel = chassis_vy * DEGREE_2_RAD * RADIUS_WHEEL / REDUCTION_RATIO_WHEEL;
     
     // 实际速度 (融合后的底盘速度 mm/s)
     float actual_vx = chassis_feedback_data.real_vx;
@@ -549,26 +594,22 @@ static void LimitChassisOutput()
 
     // 混合控制模式: 设置目标速度，前馈已在GlobalObserverCalculate中更新
     // 电机模块会自动使用速度环+电流前馈
-    // TCS: 根据滑移率降低速度参考值，限制打滑
-    float tcs_lf = wheel_slip[WHEEL_LF].tcs_factor;
-    float tcs_rf = wheel_slip[WHEEL_RF].tcs_factor;
-    float tcs_lb = wheel_slip[WHEEL_LB].tcs_factor;
-    float tcs_rb = wheel_slip[WHEEL_RB].tcs_factor;
-    
+    // 注: 打滑检测仅用于调整卡尔曼R值，不再降低速度目标
+    //     SMC+ESO会自动补偿打滑造成的扰动
     if(chassis_cmd_recv.chassis_mode == CHASSIS_ROTATE)
     {
-        // 自旋模式: 速度增强，同时应用TCS
-        DJIMotorSetRef(motor_lf, vt_lf * 1.25f * tcs_lf);
-        DJIMotorSetRef(motor_rf, vt_rf * 1.25f * tcs_rf);
-        DJIMotorSetRef(motor_lb, vt_lb * 1.25f * tcs_lb);
-        DJIMotorSetRef(motor_rb, vt_rb * 1.25f * tcs_rb);
+        // 自旋模式: 速度增强
+        DJIMotorSetRef(motor_lf, vt_lf * 1.25f);
+        DJIMotorSetRef(motor_rf, vt_rf * 1.25f);
+        DJIMotorSetRef(motor_lb, vt_lb * 1.25f);
+        DJIMotorSetRef(motor_rb, vt_rb * 1.25f);
     }
     else
     {
-        DJIMotorSetRef(motor_lf, vt_lf * tcs_lf);
-        DJIMotorSetRef(motor_rf, vt_rf * tcs_rf);
-        DJIMotorSetRef(motor_lb, vt_lb * tcs_lb);
-        DJIMotorSetRef(motor_rb, vt_rb * tcs_rb);
+        DJIMotorSetRef(motor_lf, vt_lf);
+        DJIMotorSetRef(motor_rf, vt_rf);
+        DJIMotorSetRef(motor_lb, vt_lb);
+        DJIMotorSetRef(motor_rb, vt_rb);
     }
 
 
@@ -586,7 +627,7 @@ static void LimitChassisOutput()
     // 超级电容控制: 发送裁判系统功率限制和能量缓冲区  
     struct CapTxMsg cap_msg = {
         .enableDCDC = enableDCDC,
-        .systemRestart = restart,
+        .systemRestart = 0, //restart,
         .RefereePowerLimit = 100,
         .RefereeEnergyBuffer = 60,
     };
@@ -672,9 +713,8 @@ static float EstimateSpeed()
     chassis_feedback_data.real_vx = SimpleKalman1D_Update(&kf_vx, imu_accel_x, wheel_vx, dt);
     chassis_feedback_data.real_vy = SimpleKalman1D_Update(&kf_vy, imu_accel_y, wheel_vy, dt);
     
-    // ==================== 基于加速度的打滑检测 (解决循环依赖) ====================
-    // 原理: 用IMU加速度直接预测各轮期望速度变化，与实际轮速变化对比
-    // 优点: 不依赖融合速度，打破 融合速度->打滑检测->卡尔曼R->融合速度 的循环
+    // ==================== 基于加速度的打滑检测 ====================
+    // 用IMU加速度直接预测各轮期望速度变化，与实际轮速变化对比
     
     // 1. 用IMU加速度预测底盘速度变化 (mm/s)
     float dv_x = imu_accel_x * dt;  // 底盘X方向速度变化
@@ -719,31 +759,17 @@ static float EstimateSpeed()
         if (slip_indicator > TCS_SLIP_THRESHOLD && wheel_speed_abs > 100.0f) {
             wheel_slip[i].is_slipping = 1;
             any_wheel_slipping = 1;
-            
-            // 降低tcs_factor
-            float reduction = slip_indicator * TCS_RESPONSE_GAIN;
-            wheel_slip[i].tcs_factor -= reduction;
-            if (wheel_slip[i].tcs_factor < TCS_MIN_FACTOR) {
-                wheel_slip[i].tcs_factor = TCS_MIN_FACTOR;
-            }
         } else {
             wheel_slip[i].is_slipping = 0;
-            
-            // 逐渐恢复tcs_factor
-            if (wheel_slip[i].tcs_factor < 1.0f) {
-                wheel_slip[i].tcs_factor += TCS_RECOVERY_RATE;
-                if (wheel_slip[i].tcs_factor > 1.0f) {
-                    wheel_slip[i].tcs_factor = 1.0f;
-                }
-            }
         }
     }
     
     // VOFA+调试输出
     VOFA(0, imu_raw_vx, imu_raw_vy, wheel_vx, wheel_vy,
          chassis_feedback_data.real_vx, chassis_feedback_data.real_vy, 
-         imu_accel_x, imu_accel_y, wheel_slip[0].tcs_factor, wheel_slip[1].tcs_factor,
-         wheel_slip[2].tcs_factor, wheel_slip[3].tcs_factor);
+         imu_accel_x, imu_accel_y, 
+         (float)wheel_slip[0].is_slipping, (float)wheel_slip[1].is_slipping,
+         (float)wheel_slip[2].is_slipping, (float)wheel_slip[3].is_slipping);
     
     // ==================== 卡尔曼R值调整 ====================
     // 根据打滑轮数量调整: 打滑轮越多，轮速可信度越低
@@ -773,7 +799,8 @@ static float EstimateSpeed()
 void ChassisTask()
 {
     // 电机离线报警: RF=1声, LB=2声, RB=3声, LF=4声
-    MotorOfflineAlarmTask(chassis_offline_alarm);
+    
+    //MotorOfflineAlarmTask(chassis_offline_alarm);
     
     // 后续增加没收到消息的处理(双板的情况)
     // 获取新的控制信息

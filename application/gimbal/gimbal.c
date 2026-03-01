@@ -83,7 +83,7 @@ void GimbalInit()
                 .Output_LPF_RC = 0.002,//0.002
                 .Improve = PID_Trapezoid_Intergral |PID_Integral_Limit |PID_Derivative_On_Measurement |  PID_OutputFilter,
                 .IntegralLimit = 5000,
-                .MaxOut = 100,//20000
+                .MaxOut = 20000,//20000
             },
             .other_angle_feedback_ptr = &gimba_IMU_data->YawTotalAngle,
             // 还需要增加角速度额外反馈指针,注意方向,ins_task.md中有c板的bodyframe坐标系说明
@@ -282,16 +282,16 @@ void GimbalTask()
         last_feedforward_time = current_time;
     }
     
-    // 应用渐变系数到前馈输出
-    yaw_speed_feedforward = yaw_speed_filtered * feedforward_ramp_factor;
-    pitch_speed_feedforward = pitch_speed_filtered * feedforward_ramp_factor;
+    // 应用渐变系数和前馈系数到前馈输出
+    // 注意: yaw_speed_filtered 单位是 °/s, 但 Gyro 反馈是 rad/s, 需要转换
+    yaw_speed_feedforward = yaw_speed_filtered * feedforward_ramp_factor * YAW_SPEED_FF_COEF * DEGREE_2_RAD;
+    pitch_speed_feedforward = pitch_speed_filtered * feedforward_ramp_factor * PITCH_SPEED_FF_COEF * DEGREE_2_RAD;
     
     // 电流前馈 = 加速度前馈 * 系数
     float yaw_acc_current = YAW_ACC_TO_CURRENT * yaw_acc_filtered * feedforward_ramp_factor;
     float pitch_acc_current = PITCH_ACC_TO_CURRENT * pitch_acc_filtered * feedforward_ramp_factor;
-    yaw_current_feedforward = yaw_acc_current;  // yaw只有加速度前馈
+    yaw_current_feedforward = yaw_acc_current;  
     
-    // ======================== Pitch重力补偿计算 ========================
     // 使用IMU的Pitch角度计算重力补偿: feedforward = MAX * cos(pitch_angle)
     float pitch_angle_rad = (gimba_IMU_data->Pitch - PITCH_HORIZONTAL_ANGLE) * DEGREE_2_RAD;
     float pitch_gravity_comp = GRAVITY_COMP_MAX * arm_cos_f32(pitch_angle_rad);

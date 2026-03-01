@@ -161,6 +161,10 @@ static float vt_lf, vt_rf, vt_lb, vt_rb;
 // 初始化标志
 static uint8_t force_ctrl_inited = 0;
 
+// 静止检测: 用于清零SMC和DOB状态
+#define SMC_DOB_RESET_THRESHOLD  30   // 静止检测阈值 (30*2ms=60ms)
+static uint32_t zero_input_cnt = 0;    // 零输入计数器
+
 /* ===================== 内部函数声明 ===================== */
 static void EstimateSpeed(float dt);
 static void MecanumCalculate(void);
@@ -184,6 +188,42 @@ static void FrictionAdaptiveLimiter(float *Fx, float *Fy);
 #define CENTER2 ((L - CENTER_GIMBAL_OFFSET_X - CENTER_GIMBAL_OFFSET_Y) * DEGREE_2_RAD)
 #define CENTER3 ((L + CENTER_GIMBAL_OFFSET_X + CENTER_GIMBAL_OFFSET_Y) * DEGREE_2_RAD)
 #define CENTER4 ((L - CENTER_GIMBAL_OFFSET_X + CENTER_GIMBAL_OFFSET_Y) * DEGREE_2_RAD)
+
+/* ===================== 静止检测清零 ===================== */
+
+/**
+ * @brief 重置SMC和DOB状态 (静止时调用)
+ */
+static void ResetSMC_DOB(void)
+{
+    // 重置SMC积分和状态
+    smc_vx.v_integral = 0;
+    smc_vx.v_err_last = 0;
+    smc_vx.s_last = 0;
+    smc_vx.disturbance = 0;
+    
+    smc_vy.v_integral = 0;
+    smc_vy.v_err_last = 0;
+    smc_vy.s_last = 0;
+    smc_vy.disturbance = 0;
+    
+    // 重置DOB状态
+    dob_x.z = 0;
+    dob_x.d_hat = 0;
+    dob_y.z = 0;
+    dob_y.d_hat = 0;
+    
+    // 重置力指令
+    force_cmd.Fx = 0;
+    force_cmd.Fy = 0;
+    force_cmd.Mz = 0;
+    
+    // 重置前馈电流
+    current_ff_lf = 0;
+    current_ff_rf = 0;
+    current_ff_lb = 0;
+    current_ff_rb = 0;
+}
 
 /* ===================== 二阶滑模控制实现 (Super-Twisting) ===================== */
 
@@ -599,6 +639,7 @@ static void EstimateSpeed(float dt)
     // 4. 打滑检测: 比较期望速度变化与实际速度变化
     float expected_dv[4] = {expected_dv_lf, expected_dv_rf, expected_dv_lb, expected_dv_rb};
     float actual_dv[4] = {actual_dv_lf, actual_dv_rf, actual_dv_lb, actual_dv_rb};
+    float wheel_speeds[4] = {wheel_lf, wheel_rf, wheel_lb, wheel_rb};
     
     uint8_t any_wheel_slipping = 0;
     for (int i = 0; i < 4; i++) {
@@ -610,11 +651,9 @@ static void EstimateSpeed(float dt)
         wheel_slip[i].deviation = slip_indicator;
         
         // 打滑判定: 差异超过阈值且轮速足够大(避免静止时误判)
-        float wheel_speed = fabsf((i == 0) ? wheel_lf : 
-                                  (i == 1) ? wheel_rf : 
-                                  (i == 2) ? wheel_lb : wheel_rb);
+        float wheel_speed_abs = fabsf(wheel_speeds[i]);
         
-        if (slip_indicator > TCS_SLIP_THRESHOLD && wheel_speed > 100.0f) {
+        if (slip_indicator > TCS_SLIP_THRESHOLD && wheel_speed_abs > 100.0f) {
             wheel_slip[i].is_slipping = 1;
             any_wheel_slipping = 1;
         } else {
@@ -648,9 +687,6 @@ static void EstimateSpeed(float dt)
  */
 static void MecanumCalculate(void)
 {   
-    chassis_vx *= 10;
-    chassis_vy *= 10;
-    
     // X型全向轮逆运动学
     vt_lf = (-chassis_vx - chassis_vy) / Sqrt(2) + chassis_cmd_recv.wz * CENTER2;
     vt_rf = (chassis_vx - chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER1;
@@ -667,6 +703,19 @@ static void ForceControlCalculate(float dt)
 {
 #if defined(CHASSIS_BOARD) || defined(CHASSIS_ONLY)
     if (!force_ctrl_inited) return;
+    
+    // ==================== 静止检测: 清零SMC和DOB ====================
+    // 当遥控器vx/vy都接近0时开始计数，达到阈值后重置状态
+    if (fabsf(chassis_cmd_recv.vx) < 10.0f && fabsf(chassis_cmd_recv.vy) < 10.0f) {
+        zero_input_cnt++;
+        if (zero_input_cnt >= SMC_DOB_RESET_THRESHOLD) {
+            ResetSMC_DOB();
+            zero_input_cnt = SMC_DOB_RESET_THRESHOLD;  // 防止溢出
+            return;  // 静止时不计算
+        }
+    } else {
+        zero_input_cnt = 0;  // 有输入时重置计数器
+    }
     
     // 1. 获取状态 (单位转换: mm/s -> m/s)
     float vx_ref = chassis_cmd_recv.vx / 1000.0f;
