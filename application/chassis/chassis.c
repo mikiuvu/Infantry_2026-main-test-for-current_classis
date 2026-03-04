@@ -799,8 +799,7 @@ static float EstimateSpeed()
 void ChassisTask()
 {
     // 电机离线报警: RF=1声, LB=2声, RB=3声, LF=4声
-    
-    //MotorOfflineAlarmTask(chassis_offline_alarm);
+    MotorOfflineAlarmTask(chassis_offline_alarm);
     
     // 后续增加没收到消息的处理(双板的情况)
     // 获取新的控制信息

@@ -20,15 +20,12 @@ static Gimbal_Ctrl_Cmd_s gimbal_cmd_recv;         // 来自cmd的控制信息
 static Chassis_Upload_Data_s chassis_real_speed;
 static Subscriber_t *chassis_speed_sub; // 底盘反馈信息订阅者
 
-// ======================== 速度前馈 (本地计算) ========================
 static float yaw_speed_feedforward = 0.0f;    // yaw速度前馈 (本地微分计算)
 static float pitch_speed_feedforward = 0.0f;  // pitch速度前馈 (本地微分计算)
 
-// ======================== 电流前馈 (加速度前馈 + 重力补偿) ========================
 static float yaw_current_feedforward = 0.0f;    // yaw电流前馈
 static float pitch_current_feedforward = 0.0f;  // pitch电流前馈
 
-// ======================== 本地前馈计算变量 ========================
 static float yaw_ref_prev = 0.0f;           // 上一次yaw目标角度
 static float pitch_ref_prev = 0.0f;         // 上一次pitch目标角度
 static float yaw_speed_raw_prev = 0.0f;     // 上一次yaw速度 (用于计算加速度)
@@ -156,7 +153,7 @@ void GimbalInit()
     gimbal_sub = SubRegister("gimbal_cmd", sizeof(Gimbal_Ctrl_Cmd_s));
     chassis_speed_sub = SubRegister("chassis_feed", sizeof(Chassis_Upload_Data_s));
     
-    // 云台电机离线检测配置 (类似PID配置风格)
+    // 云台电机离线检测配置
     MotorOfflineAlarmConfig_t gimbal_alarm_cfg = {
         .motors = {yaw_motor, pitch_motor},
         .beep_times = {1, 2},       // yaw=1声, pitch=2声

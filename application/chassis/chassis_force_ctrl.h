@@ -1,16 +1,34 @@
 /**
  * @file chassis_force_ctrl.h
- * @brief 力控底盘头文件
- * @note 通过在robot_def.h中定义USE_FORCE_CONTROL_CHASSIS宏启用
+ * @brief 纯力矩控制底盘 (Super-Twisting SMC + ESO + 阻力前馈 + 加速度前馈)
+ * @note 通过在robot_def.h中定义FORCE_CONTROL_CHASSIS_BOARD宏启用
  * 
- * 力控底盘特性:
- * - 力矩前馈 + 软速度环兜底
- * - 在线自适应参数估计
- * - 滑模控制 + 扰动观测器(DOB)
- * - 摩擦系数在线估计
+ * 控制架构 (每轮独立, 无PID, 无软速度环):
  * 
- * @version 1.0
- * @date 2026-03-01
+ *   u = u_ff + u_drag + u_smc + u_eso
+ * 
+ *   u_ff   = k_ff * dv_ref/dt                         (加速度前馈, 提升响应)
+ *   u_drag = (a0 + a1|w| + a2|w|²) * sign(w)          (阻力前馈, 抵消损耗)
+ *   u_smc  = Super-Twisting(s)                         (二阶滑模, 连续输出无抖振)
+ *   u_eso  = -d_hat                                    (ESO扰动补偿)
+ *   s      = v_ref - w                                (滑模面 = 速度误差)
+ * 
+ * Super-Twisting算法:
+ *   u1 = -k1 * sqrt(|s|) * sign(s)   (比例项)
+ *   σ̇  = -k2 * sign(s)              (积分项动态)
+ *   u_smc = u1 + σ                   (连续控制输出)
+ * 
+ * ESO (扩张状态观测器):
+ *   e = w - z1
+ *   ż1 = b0 * (u_applied - u_drag) + z2 + β1 * e
+ *   ż2 = β2 * e
+ *   d_hat = z2 / b0                  (估计扰动→控制输入补偿)
+ * 
+ * 底盘速度观测: IMU加速度 + 轮速卡尔曼融合, 打滑检测动态调整R值.
+ * 电机配置为 OPEN_LOOP, DJIMotorSetRef() 直接输出 C620 电流指令.
+ * 
+ * @version 3.0
+ * @date 2026-03-02
  */
 
 #ifndef CHASSIS_FORCE_CTRL_H
@@ -27,210 +45,139 @@
 #include "arm_math.h"
 #include "bsp_buzzer.h"
 
-/* ===================== 车辆物理参数 ===================== */
-// 这些参数需要根据实际机器人测量/标定
-#define FC_CHASSIS_MASS          15.0f      // 整车质量 (kg)
-#define FC_CHASSIS_INERTIA_Z     0.8f       // Z轴转动惯量 (kg*m²)
-#define FC_WHEEL_RADIUS          0.076f     // 轮子半径 (m)
-#define FC_WHEEL_BASE_L          0.2f       // 轮距/2 (m), 轮子到中心距离
+/* ===================== Super-Twisting 滑模参数 ===================== */
+// Super-Twisting: u1 = -k1*|s|^0.5*sign(s), dσ/dt = -k2*sign(s)
+// u_smc = u1 + σ
+// 稳定性条件: k2 > 0, k1 > sqrt(2*k2)
+// sign(s) 使用 SmoothSign(s, phi) 平滑, phi 越大越平滑
+#define FC_ST_K1                 15.0f      // ST比例增益 (决定收敛速度)
+#define FC_ST_K2                 30.0f      // ST积分增益 (补偿不确定性)
+#define FC_ST_PHI                0.3f       // SmoothSign边界层 (deg/s)
+#define FC_ST_SIGMA_MAX          5000.0f    // 积分项限幅 (防止饱和)
 
-/* ===================== 电机力矩参数 ===================== */
-// M3508: k_t = 0.3 N*m/A, 减速比15.7, 轮径0.076m
-// k_total = k_t / 减速比 / R_wheel = 0.3 / 15.7 / 0.076 ≈ 0.00252 N/A
-// 考虑效率损失(~90%), 初始值取 0.00227 N/A
-#define FC_KT_INITIAL            0.00227f   // 初始力矩常数 (N/A)
-#define FC_KT_MIN                0.0015f    // 最小允许值 (约65%标称)
-#define FC_KT_MAX                0.0035f    // 最大允许值 (约155%标称)
+/* ===================== ESO 扩张状态观测器参数 ===================== */
+// 二阶ESO: 观测 [速度, 总扰动]
+// 带宽 ω_o 决定观测速度, β1 = 2*ω_o, β2 = ω_o^2
+// b0: 控制效能系数, 表示单位控制输入(C620单位)产生多少 deg/s² 的加速度
+// b0 估算: 20A对应16384单位, kt=0.3Nm/A, 减速比15.7, 轮惯量J_wheel
+//          b0 = (kt * 减速比) / (J_eq * 16384/20) ≈ 需要实测调节
+#define FC_ESO_OMEGA             50.0f      // ESO带宽 (rad/s), 越大响应越快但噪声越大
+#define FC_ESO_BETA1             (2.0f * FC_ESO_OMEGA)           // = 100
+#define FC_ESO_BETA2             (FC_ESO_OMEGA * FC_ESO_OMEGA)   // = 2500
+#define FC_ESO_B0                0.5f       // 控制效能系数 (C620单位 → deg/s²), 需实测调节
+#define FC_ESO_D_MAX             10000.0f   // 最大扰动估计限幅 (防止发散)
 
-/* ===================== 电机摩擦模型参数 ===================== */
-// 电机模型: τ_m = K_t * I - τ_c * sign(ω) - b * ω
-// 这些参数需要通过实验标定:
-// 1. τ_c: 使用拉力计测量启动电流, τ_c = K_t * I_startup
-// 2. b: 使用降速法测量或稳态运行测量
-// 注意: 这里的参数已换算到轮子输出力 (N)
-#define FC_TAU_C_INITIAL         0.8f       // 库仑摩擦力 (N), 需实测标定
-#define FC_VISCOUS_B_INITIAL     0.02f      // 粘性摩擦系数 (N/(rad/s)), 需实测标定
-#define FC_FRICTION_COMP_ENABLE  1          // 1=启用摩擦补偿, 0=禁用
+/* ===================== 加速度前馈参数 ===================== */
+// u_ff = k_ff * (v_ref(k) - v_ref(k-1)) / dt
+#define FC_K_FF                  1.2f       // 前馈增益
 
-/* ===================== 自适应控制参数 ===================== */
-#define FC_ADAPTIVE_GAMMA        0.00001f   // 自适应增益
-#define FC_ADAPTIVE_I_THRESHOLD  2.0f       // 电流阈值 (A), 低于此值不更新
+/* ===================== 阻力前馈模型参数 ===================== */
+// 模型: drag(|w|) = a0 + a1*|w| + a2*|w|^2
+// w 单位: 电机轴速度 speed_aps (deg/s)
+// drag 输出单位: C620 电流指令
+//
+// 标定方法:
+//   1. 使用普通速度PID底盘(CHASSIS_BOARD), 让底盘稳定平动
+//   2. 记录各电机 speed_aps 与 real_current (稳态电流)
+//   3. 多组速度点拟合: I_steady = a0 + a1*|w| + a2*|w|^2
+//   4. 将拟合参数填入下方宏, 切换到力控模式
+//
+// 物理意义:
+//   a0: 库仑摩擦 (静摩擦 + 低速阻力)
+//   a1: 粘滞摩擦系数
+//   a2: 风阻 / 高速阻力系数
+#define FC_A0                    0.15f      // 库仑摩擦 (C620单位)
+#define FC_A1                    0.02f      // 粘滞摩擦系数
+#define FC_A2                    0.0005f    // 高速阻力系数
 
-/* ===================== 二阶滑模控制参数 (Super-Twisting) ===================== */
-// Super-Twisting算法: u = -k1*|s|^0.5*sign(s) + v, dv/dt = -k2*sign(s)
-// 稳定性条件: k1 > 0, k2 > 0, 且 k2 > k1^2/(4*k1 + delta)
-#define FC_SMC_LAMBDA            2.0f       // 滑模面斜率 (一阶导数系数)
-#define FC_SMC_K1                80.0f      // Super-Twisting增益k1
-#define FC_SMC_K2                150.0f     // Super-Twisting增益k2 (积分项增益)
-#define FC_SMC_PHI               0.05f      // 边界层厚度 (用于sign函数平滑)
-#define FC_SMC_V_MAX             200.0f     // 积分项最大值限幅 (N)
+/* ===================== 输出限幅 ===================== */
+#define FC_MAX_TORQUE            16000.0f   // 最大输出 (C620: ±16384)
 
-/* ===================== 扰动观测器参数 ===================== */
-#define FC_DOB_L                 50.0f      // 观测器增益/带宽
-#define FC_DOB_D_MAX             75.0f      // 最大扰动估计 (N), 约0.5g
+/* ===================== 打滑检测参数 ===================== */
+#define FC_SLIP_THRESHOLD        30.0f      // 打滑判定阈值 (mm/s 速度变化差)
+#define FC_SLIP_SPEED_MIN        100.0f     // 最小轮速才检测 (mm/s, 避免静止误判)
 
-/* ===================== 摩擦估计参数 ===================== */
-#define FC_MU_INITIAL            0.85f      // 初始摩擦效率
-#define FC_MU_MIN                0.30f      // 最小摩擦效率 (湿滑地面)
-#define FC_MU_FILTER_ALPHA       0.02f      // 滤波系数
+/* ===================== 底盘IMU偏移 ===================== */
+#define FC_IMU_OFFSET_X          CHASSIS_IMU_OFFSET_X   // mm
+#define FC_IMU_OFFSET_Y          CHASSIS_IMU_OFFSET_Y   // mm
 
-/* ===================== 软速度环参数 ===================== */
-#define FC_SOFT_SPEED_KP         1.0f       // 软速度环比例增益
-#define FC_SOFT_SPEED_KI         0.1f       // 软速度环积分增益
-#define FC_SOFT_SPEED_MAX_OUT    5000.0f    // 软速度环最大输出
+/* ===================== 单位转换 ===================== */
+#define WHEEL_MMPS_TO_MOTOR_APS  (REDUCTION_RATIO_WHEEL / ((float)RADIUS_WHEEL * DEGREE_2_RAD))
 
 /* ===================== 数据结构定义 ===================== */
 
 /**
- * @brief 底盘力指令结构体
+ * @brief 单轮ESO状态
  */
 typedef struct {
-    float Fx;       // X方向目标力 (N)
-    float Fy;       // Y方向目标力 (N)
-    float Mz;       // Z轴目标力矩 (N*m)
-} ChassisForceCmd_t;
+    float z1;               // 观测速度 (deg/s)
+    float z2;               // 观测扰动 (内部单位: deg/s²)
+    float d_hat;            // 输出扰动补偿 (C620单位): = z2 / b0
+} WheelESO_t;
 
 /**
- * @brief 在线自适应参数估计结构体
+ * @brief 单轮Super-Twisting滑模控制器状态
  */
 typedef struct {
-    float kt_estimate;      // 估计的力矩常数 (N/A)
-    float kt_min;           // 最小允许值
-    float kt_max;           // 最大允许值
-    float gamma;            // 自适应增益
-} AdaptiveParam_t;
+    float sigma;            // 积分项状态
+} WheelST_SMC_t;
 
 /**
- * @brief 电机摩擦模型参数结构体
- * @note 模型: τ_m = K_t * I - τ_c * sign(ω) - b * ω
+ * @brief 单轮力矩控制器完整状态
  */
 typedef struct {
-    float tau_c;            // 库仑摩擦力 (N)
-    float viscous_b;        // 粘性摩擦系数 (N/(rad/s))
-    uint8_t enable;         // 是否启用摩擦补偿
-} MotorFrictionModel_t;
+    // Super-Twisting SMC
+    WheelST_SMC_t  st;     // ST状态
+    // ESO
+    WheelESO_t     eso;    // ESO状态
+    // 前馈
+    float v_ref_last;       // 上一时刻目标速度 (deg/s)
+    // 各项输出 (用于调试)
+    float u_ff;             // 加速度前馈
+    float u_drag;           // 阻力前馈
+    float u_smc;            // Super-Twisting输出
+    float u_eso;            // ESO补偿
+    float u_total;          // 总输出 (限幅后)
+    float s;                // 滑模面
+} WheelTorqueCtrl_t;
 
 /**
- * @brief 二阶滑模控制器结构体 (Super-Twisting算法)
- * @note Super-Twisting: u = -k1*|s|^0.5*sign(s) + v, dv/dt = -k2*sign(s)
- *       实现连续控制输出，天然抑制抖振
+ * @brief 打滑检测 (每轮)
  */
 typedef struct {
-    float lambda;           // 滑模面斜率
-    float st_k1;            // Super-Twisting增益k1 (比例项)
-    float st_k2;            // Super-Twisting增益k2 (积分项)
-    float phi;              // 边界层厚度 (sign函数平滑)
-    float v_integral;       // Super-Twisting积分项状态
-    float v_max;            // 积分项限幅
-    float disturbance;      // 估计的扰动 (由DOB提供)
-    float v_err_last;       // 上一周期速度误差 (用于微分)
-    float s_last;           // 上一周期滑模面值 (用于调试)
-} SlidingModeCtrl_t;
+    uint8_t is_slipping;
+    float deviation;        // 打滑指标 (mm/s)
+    float expected_dv;      // IMU预测速度变化 (mm/s)
+    float actual_dv;        // 实际速度变化 (mm/s)
+    float last_speed;       // 上一帧轮速 (mm/s)
+} WheelSlip_t;
 
 /**
- * @brief 扰动观测器结构体
+ * @brief 力矩控制调试数据 (用于VOFA输出)
+ * @note 数组下标: [0]=LF, [1]=RF, [2]=LB, [3]=RB
  */
 typedef struct {
-    float z;                // 观测器内部状态
-    float d_hat;            // 估计扰动 (N)
-    float L;                // 观测器增益
-} DisturbanceObserver_t;
-
-/**
- * @brief 摩擦系数在线估计结构体
- */
-typedef struct {
-    float mu_estimate;      // 当前估计摩擦效率
-    float mu_nominal;       // 标称值
-    float mu_min;           // 最小值
-    float filter_alpha;     // 滤波系数
-    uint32_t sample_count;  // 有效样本计数
-} FrictionEstimator_t;
-
-/**
- * @brief 力控调试数据结构体 (用于VOFA输出)
- */
-typedef struct {
-    // 速度跟踪
-    float vx_ref;           // 目标速度X (m/s)
-    float vy_ref;           // 目标速度Y (m/s)
-    float vx_act;           // 实际速度X (m/s)
-    float vy_act;           // 实际速度Y (m/s)
-    
-    // 力控输出
-    float Fx_cmd;           // 目标力X (N)
-    float Fy_cmd;           // 目标力Y (N)
-    
-    // 自适应
-    float kt_estimate;      // kt估计值
-    
-    // 扰动
-    float dx_hat;           // X扰动估计 (N)
-    float dy_hat;           // Y扰动估计 (N)
-    
-    // 摩擦
-    float mu_estimate;      // 摩擦效率
-    
-    // 摩擦补偿
-    float friction_comp[4]; // 四轮摩擦补偿电流 (LF, RF, LB, RB)
-    
-    // 电流前馈
-    float current_ff[4];    // 四轮电流前馈 (LF, RF, LB, RB)
+    // 每轮速度跟踪
+    float v_ref[4];         // 目标速度 (deg/s)
+    float v_act[4];         // 实际速度 (deg/s)
+    float s[4];             // 滑模面 (deg/s)
+    // 每轮控制输出分量
+    float u_ff[4];          // 加速度前馈
+    float u_drag[4];        // 阻力前馈
+    float u_smc[4];         // Super-Twisting输出
+    float u_eso[4];         // ESO扰动补偿
+    float u_total[4];       // 总输出 (限幅后)
+    // ESO状态
+    float eso_d_hat[4];     // 各轮ESO扰动估计
+    // 底盘状态
+    float chassis_vx;       // 卡尔曼融合速度X (mm/s)
+    float chassis_vy;       // 卡尔曼融合速度Y (mm/s)
 } ForceCtrlDebug_t;
 
 /* ===================== 函数声明 ===================== */
 
-/**
- * @brief 力控底盘初始化
- * @note 在RobotInit()中调用, 替代ChassisInit()
- */
 void ChassisForceCtrlInit(void);
-
-/**
- * @brief 力控底盘任务
- * @note 在FreeRTOS任务中周期调用, 替代ChassisTask()
- */
 void ChassisForceCtrlTask(void);
-
-/**
- * @brief 获取力控调试数据
- * @return 调试数据结构体指针
- */
 const ForceCtrlDebug_t* GetForceCtrlDebugData(void);
-
-/**
- * @brief 获取自适应参数
- * @return 自适应参数结构体指针
- */
-const AdaptiveParam_t* GetAdaptiveParam(void);
-
-/**
- * @brief 获取摩擦估计数据
- * @return 摩擦估计结构体指针
- */
-const FrictionEstimator_t* GetFrictionEstimator(void);
-
-/**
- * @brief 获取电机摩擦模型参数
- * @return 电机摩擦模型结构体指针
- */
-const MotorFrictionModel_t* GetMotorFrictionModel(void);
-
-/**
- * @brief 设置电机摩擦模型参数 (用于标定后更新)
- * @param tau_c 库仑摩擦力 (N)
- * @param viscous_b 粘性摩擦系数 (N/(rad/s))
- */
-void SetMotorFrictionModel(float tau_c, float viscous_b);
-
-/**
- * @brief 重置自适应参数到初始值
- */
-void ResetAdaptiveParam(void);
-
-/**
- * @brief 重置摩擦估计到初始值
- */
-void ResetFrictionEstimator(void);
 
 #endif // CHASSIS_FORCE_CTRL_H
