@@ -27,12 +27,10 @@ static uint8_t  is_on       = 0;     // 当前是否在响
 #define BUZZER_TAIL_SILENCE_MS  80
 static uint8_t tail_silence = 0;
 
-// --- 降调蜂鸣状态 ---
-static uint8_t  desc_total_steps   = 0;
-static uint8_t  desc_current_step  = 0;
-static uint16_t desc_step_ms       = 0;
-static uint8_t  desc_freq_start    = 1;
-static uint8_t  desc_freq_end      = 10;
+// --- 降调蜂鸣状态 (连续线性递减) ---
+static int16_t  desc_start_val   = 4000;  // 起始计数
+static int16_t  desc_end_val     = 1000;  // 停止阈值
+static uint16_t desc_duration_ms = 1500;  // 总时长(ms)
 
 // ======================== 硬件操作 ========================
 
@@ -42,6 +40,16 @@ static void _BuzzerHwOn(uint8_t freq)
     if (freq > 10) freq = 10;
     __HAL_TIM_PRESCALER(&htim4, freq);
     __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, 5000);
+}
+
+/**
+ * @brief 直接设置prescaler+compare (降调模式专用)
+ */
+static void _BuzzerHwOnRaw(int16_t prescaler, uint16_t compare)
+{
+    if (prescaler < 1) prescaler = 1;
+    __HAL_TIM_PRESCALER(&htim4, (uint32_t)prescaler);
+    __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, compare);
 }
 
 static void _BuzzerHwOff(void)
@@ -75,20 +83,19 @@ void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint8_t freq)
     _BuzzerHwOn(freq);
 }
 
-void BuzzerPlayDescending(uint8_t steps, uint16_t step_ms, uint8_t freq_start, uint8_t freq_end)
+void BuzzerPlayDescending(int16_t start_val, int16_t end_val, uint16_t duration_ms)
 {
-    if (steps == 0) return;
+    if (duration_ms == 0 || start_val <= end_val) return;
 
-    buzzer_mode       = BUZZER_MODE_DESCENDING;
-    desc_total_steps  = steps;
-    desc_current_step = 0;
-    desc_step_ms      = step_ms;
-    desc_freq_start   = (freq_start < 1)  ? 1  : freq_start;
-    desc_freq_end     = (freq_end   > 10) ? 10 : freq_end;
-    tail_silence      = 0;
+    buzzer_mode      = BUZZER_MODE_DESCENDING;
+    desc_start_val   = start_val;
+    desc_end_val     = end_val;
+    desc_duration_ms = duration_ms;
+    tail_silence     = 0;
     last_transition_ms = DWT_GetTimeline_ms();
 
-    _BuzzerHwOn(desc_freq_start);
+    // 立即以起始值开始响
+    _BuzzerHwOnRaw((int16_t)(start_val / 1000), 10000);
 }
 
 void BuzzerTask(void)
@@ -127,23 +134,20 @@ void BuzzerTask(void)
             }
         }
     }
-    // --- 降调蜂鸣模式 ---
+    // --- 降调蜂鸣模式 (连续线性递减, 参照BuzzerOn()) ---
     else if (buzzer_mode == BUZZER_MODE_DESCENDING) {
-        if (elapsed >= (float)desc_step_ms) {
-            desc_current_step++;
-            if (desc_current_step >= desc_total_steps) {
-                // 降调播放完毕
-                _BuzzerHwOff();
-                last_transition_ms = now;
-                tail_silence = 1;
-            } else {
-                // 线性插值: 从freq_start渐变到freq_end
-                uint8_t freq = desc_freq_start +
-                    (uint8_t)((float)(desc_freq_end - desc_freq_start) *
-                              (float)desc_current_step / (float)(desc_total_steps - 1));
-                _BuzzerHwOn(freq);
-                last_transition_ms = now;
-            }
+        if (elapsed >= (float)desc_duration_ms) {
+            // 降调播放完毕
+            _BuzzerHwOff();
+            last_transition_ms = now;
+            tail_silence = 1;
+        } else {
+            // 线性插值: start_val → end_val, prescaler = val / 1000
+            float progress = elapsed / (float)desc_duration_ms;
+            int16_t val = desc_start_val -
+                (int16_t)(progress * (float)(desc_start_val - desc_end_val));
+            if (val < desc_end_val) val = desc_end_val;
+            _BuzzerHwOnRaw((int16_t)(val / 1000), 10000);
         }
     }
 }
@@ -170,6 +174,6 @@ void BuzzerOff(void)
     beep_times   = 0;
     is_on        = 0;
     tail_silence = 0;
-    desc_total_steps  = 0;
-    desc_current_step = 0;
+    desc_start_val   = 4000;
+    desc_end_val     = 1000;
 }

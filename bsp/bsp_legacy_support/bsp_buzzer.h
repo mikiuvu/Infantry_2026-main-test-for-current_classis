@@ -28,13 +28,14 @@ void BuzzerInit(void);
 void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint8_t freq);
 
 /**
- * @brief 播放降调蜂鸣 (用于全部离线警报)
- * @param steps     音阶步数 (每步频率递增)
- * @param step_ms   每步持续时间(ms)
- * @param freq_start 起始频率等级 (1=最高音)
- * @param freq_end   结束频率等级 (10=最低音)
+ * @brief 播放连续降调蜂鸣 (用于全部离线警报)
+ * @param start_val  起始分频计数 (如4000, 对应prescaler=4, 低音)
+ * @param end_val    停止阈值 (如1000, 计数低于此值时结束)
+ * @param duration_ms 整个降调过程持续时间(ms)
+ * @note prescaler = counter / 1000, compare = 10000
+ *       参照BuzzerOn()线性递减模式, DWT精确计时
  */
-void BuzzerPlayDescending(uint8_t steps, uint16_t step_ms, uint8_t freq_start, uint8_t freq_end);
+void BuzzerPlayDescending(int16_t start_val, int16_t end_val, uint16_t duration_ms);
 
 /**
  * @brief 蜂鸣器状态机驱动 - 需周期调用(调用频率不限,内部DWT计时)

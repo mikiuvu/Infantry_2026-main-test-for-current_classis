@@ -17,10 +17,10 @@
 #include "stdint.h"
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
-//#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
+#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
 //#define CHASSIS_ONLY                  // 底盘调试模式: 无云台,只有底盘+超级电容+遥控器 
 //#define FORCE_CONTROL_CHASSIS_BOARD   // 力控底盘板
-#define GIMBAL_BOARD                    // 云台板
+//#define GIMBAL_BOARD                    // 云台板
 
 /* 遥控器类型选择: 定义USE_IMAGE_REMOTE使用图传遥控器(UART6), 注释掉则使用原DJI遥控器(USART3/DBUS) */
 //#define USE_IMAGE_REMOTE
@@ -56,16 +56,16 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD 1350  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
+#define YAW_CHASSIS_ALIGN_ECD 5457  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
 //#define YAW_CHASSIS_ALIGN_ECD 2030  //步兵二
-#define YAW_ECD_GREATER_THAN_4096 0 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
+#define YAW_ECD_GREATER_THAN_4096 1 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
 #define PITCH_MAX_ANGLE 0 //云台竖直方向最大角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度) 
 #define PITCH_MIN_ANGLE 0 //云台竖直方向最小角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度)
 
 /* ======================== 云台软件限位 ======================== */
 #define PITCH_MIN_LIMIT         -20.0f  // pitch最小角度(°)
-#define PITCH_MAX_LIMIT         12.0f   // pitch最大角度(°)
+#define PITCH_MAX_LIMIT         30.0f   // pitch最大角度(°)
 
 // 拨盘堵转检测与反转参数
 #define BLOCK_DETECT_THRESHOLD 0.80f   // 堵转判定误差阈值(误差/目标值)
@@ -79,8 +79,8 @@
 #define REDUCTION_RATIO_LOADER 36.0f // 拨盘电机的减速比,英雄需要修改为3508的19.0f
 #define NUM_PER_CIRCLE 8             // 拨盘一圈的装载量
 // 机器人底盘修改的参数,单位为mm(毫米)
-#define WHEEL_BASE 340              // 纵向轴距(前进后退方向)
-#define TRACK_WIDTH 340             // 横向轮距(左右平移方向)
+#define WHEEL_BASE 311              // 纵向轴距(前进后退方向)
+#define TRACK_WIDTH 311             // 横向轮距(左右平移方向)
 #define WHEEL_DIAGONAL (sqrt((double)(WHEEL_BASE^2) + (double)(TRACK_WIDTH^2))/2)
 #define CENTER_GIMBAL_OFFSET_X 0    // 云台旋转中心距底盘几何中心的距离,前后方向,云台位于正中心时默认设为0
 #define CENTER_GIMBAL_OFFSET_Y 0    // 云台旋转中心距底盘几何中心的距离,左右方向,云台位于正中心时默认设为0
@@ -93,6 +93,7 @@
 #define CHASSIS_IMU_OFFSET_X     -185.0f   // IMU相对底盘中心的X偏移 (mm), 正值表示IMU在前
 #define CHASSIS_IMU_OFFSET_Y     4.1f   // IMU相对底盘中心的Y偏移 (mm), 正值表示IMU在左
 
+#define CHASSIS_POWER_LIMIT 50 // 
 /* ======================== IMU安装方向校正 ======================== */
 // 使用ins_task中的IMU_Param_Correction进行方向校正
 // Yaw/Pitch/Roll: IMU安装相对于机体系的偏角 (度)
@@ -129,7 +130,7 @@
 #define PITCH_ACC_TO_CURRENT    0.05f    // pitch加速度(°/s²)转电流系数
 
 /* ======================== Pitch重力补偿参数 ======================== */
-#define GRAVITY_COMP_MAX        -9200.0f  // 最大重力补偿电流值(水平时)
+#define GRAVITY_COMP_MAX        -4200.0f  // 最大重力补偿电流值(水平时)
 #define PITCH_HORIZONTAL_ANGLE  -1.2f      // pitch水平时的IMU角度(°)
 
 // 检查是否出现主控板定义冲突,只允许一个开发板定义存在,否则编译会自动报错
@@ -267,7 +268,6 @@ typedef struct
 } Chassis_Ctrl_Cmd_s;
 
 // cmd发布的云台控制数据,由gimbal订阅
-// 前馈现在在gimbal中本地计算 (微分目标角度), 不再通过消息传递
 typedef struct
 { // 云台角度控制
     float yaw;

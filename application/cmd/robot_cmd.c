@@ -389,7 +389,7 @@ static void RemoteControlSet()
             rc_data[TEMP].rc.rocker_l1 =0;
         }
         gimbal_cmd_send.yaw -= 0.002f * (float)rc_data[TEMP].rc.rocker_l_;
-        gimbal_cmd_send.pitch -= 0.0015f * (float)rc_data[TEMP].rc.rocker_l1;
+        gimbal_cmd_send.pitch += 0.0015f * (float)rc_data[TEMP].rc.rocker_l1;
         
         // 软件限位
          if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
@@ -405,8 +405,8 @@ static void RemoteControlSet()
     // 底盘参数,目前没有加入小陀螺(调试似乎暂时没有必要),系数需要调整
     // 单位: degree/s (电机转子角速度), 摇杆范围±660, 系数×660=满杆转速
     // M3508最高约54000 degree/s, 45×660≈29700, 留有余量
-    chassis_cmd_send.vx = 45.0f * (float)rc_data[TEMP].rc.rocker_r_; // degree/s
-    chassis_cmd_send.vy = 45.0f * (float)rc_data[TEMP].rc.rocker_r1; // degree/s
+    chassis_cmd_send.vx = 70.0f * (float)rc_data[TEMP].rc.rocker_r_; // degree/s
+    chassis_cmd_send.vy = 70.0f * (float)rc_data[TEMP].rc.rocker_r1; // degree/s
     chassis_cmd_send.dash_mode = DASH_OFF;
     //chassis_cmd_send.wz=5.0f*(float)rc_data[TEMP].rc.rocker_l_;
     

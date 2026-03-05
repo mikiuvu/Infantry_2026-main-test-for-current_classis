@@ -52,17 +52,16 @@
 
 // ======================== 默认参数 ========================
 #define ALARM_DEFAULT_CHECK_PERIOD_MS  500   // 默认检测间隔(ms)
-#define ALARM_DEFAULT_BEEP_ON_MS       50    // 默认响持续时间(ms)
-#define ALARM_DEFAULT_BEEP_OFF_MS      150   // 默认间隔时间(ms)
+#define ALARM_DEFAULT_BEEP_ON_MS       80    // 默认响持续时间(ms)
+#define ALARM_DEFAULT_BEEP_OFF_MS      500   // 默认间隔时间(ms)
 #define ALARM_FREQ_HIGH                2     // 高音调 (云台/发射)
 #define ALARM_FREQ_LOW                 8     // 低音调 (底盘)
 
 // ======================== 全局行为配置 ========================
 #define ALARM_POWER_ON_SILENCE_MS      3000  // 上电静默期(ms) - 期间不报警
-#define ALARM_ALL_OFFLINE_DESC_STEPS   6     // 全离线降调: 音阶步数
-#define ALARM_ALL_OFFLINE_DESC_STEP_MS 250   // 全离线降调: 每步持续(ms)
-#define ALARM_ALL_OFFLINE_FREQ_START   1     // 全离线降调: 起始频率等级(高音)
-#define ALARM_ALL_OFFLINE_FREQ_END     10    // 全离线降调: 结束频率等级(低音)
+#define ALARM_ALL_OFFLINE_START_VAL    4000  // 全离线降调: 起始分频计数 (psc=4, 低音)
+#define ALARM_ALL_OFFLINE_END_VAL      1000  // 全离线降调: 停止阈值 (psc=1)
+#define ALARM_ALL_OFFLINE_DURATION_MS  1500  // 全离线降调: 总时长(ms)
 #define ALARM_ALL_OFFLINE_COOLDOWN_MS  2000  // 全离线降调: 播放后冷却(ms)
 
 /**
@@ -85,7 +84,7 @@ typedef struct {
     uint8_t motor_count;          // 电机数量 (必填)
     uint16_t check_period_ms;     // 检测间隔(ms), 0=使用默认500ms
     uint16_t beep_on_ms;          // 蜂鸣响持续时间(ms), 0=使用默认50ms
-    uint16_t beep_off_ms;         // 蜂鸣间隔时间(ms), 0=使用默认150ms
+    uint16_t beep_off_ms;         // 蜂鸣间隔时间(ms), 0=使用默认500ms
     uint8_t buzzer_freq;          // 音调 (ALARM_FREQ_HIGH / ALARM_FREQ_LOW)
     uint8_t run_buzzer_task;      // 1=主调度器(执行BuzzerTask+优先级调度), 0=仅扫描
 } MotorOfflineAlarmConfig_t;

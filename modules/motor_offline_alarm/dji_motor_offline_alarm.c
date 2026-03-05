@@ -175,23 +175,24 @@ void MotorOfflineAlarmTask(MotorOfflineAlarmInstance *instance)
     if (!BuzzerIsReady()) return;
 
     // ---- 全部离线 → 降调警报 (优先于单电机报警) ----
-    if (_AllMotorsOffline() && now >= _all_offline_cooldown) {
-        BuzzerPlayDescending(
-            ALARM_ALL_OFFLINE_DESC_STEPS,
-            ALARM_ALL_OFFLINE_DESC_STEP_MS,
-            ALARM_ALL_OFFLINE_FREQ_START,
-            ALARM_ALL_OFFLINE_FREQ_END);
-
-        // 设置冷却: 降调总时长 + 冷却间隔
-        _all_offline_cooldown = now +
-            (float)(ALARM_ALL_OFFLINE_DESC_STEPS * ALARM_ALL_OFFLINE_DESC_STEP_MS) +
-            (float)ALARM_ALL_OFFLINE_COOLDOWN_MS;
-
-        // 清除所有组的 pending (降调已代替)
+    if (_AllMotorsOffline()) {
+        // 清除所有组的 pending (全离线模式下不播放单电机报警)
         for (uint8_t g = 0; g < _alarm_count; g++) {
             _alarm_pool[g].pending.valid = 0;
         }
-        return;
+
+        if (now >= _all_offline_cooldown) {
+            BuzzerPlayDescending(
+                ALARM_ALL_OFFLINE_START_VAL,
+                ALARM_ALL_OFFLINE_END_VAL,
+                ALARM_ALL_OFFLINE_DURATION_MS);
+
+            // 设置冷却: 降调时长 + 冷却间隔
+            _all_offline_cooldown = now +
+                (float)ALARM_ALL_OFFLINE_DURATION_MS +
+                (float)ALARM_ALL_OFFLINE_COOLDOWN_MS;
+        }
+        return;  // 全部离线时始终跳过单电机报警
     }
 
     // ---- 优先级调度: 选取 beep_times 最少的报警播放 ----

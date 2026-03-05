@@ -119,7 +119,7 @@ static uint8_t observer_inited = 0;
 static uint32_t zero_input_cnt = 0;    // 零输入计数器
 
 // 超电重启冷却时间 (500*2ms=1s)
-#define CAP_RESTART_COOLDOWN 2000
+#define CAP_RESTART_COOLDOWN 40000
 
 /* 根据robot_def.h中的macro自动计算的参数 */
 float L=200; //轮轴距中心距离
@@ -576,11 +576,11 @@ static void LimitChassisOutput()
     // 超级电容控制: 当电容能量低于65%时关闭DC-DC，避免过放
     uint8_t enableDCDC = (cap->cap_msg.capEnergy >= 65) ? 1 : 0;
     
-    // 功率限制: DC-DC开启时使用超电输出功率，关闭时固定100W
+    // 功率限制: DC-DC开启时使用超电输出功率，关闭时固定
     if (enableDCDC) {
-        chassis_powerlimit = 40 + cap->cap_msg.chassisPowerLimit;
+        chassis_powerlimit = CHASSIS_POWER_LIMIT + cap->cap_msg.chassisPowerLimit;
     } else {
-        chassis_powerlimit = 40.0f; 
+        chassis_powerlimit = CHASSIS_POWER_LIMIT; 
     }
         ChassisPowerSet(chassis_powerlimit);
     static uint32_t cnt = 0;
@@ -599,10 +599,10 @@ static void LimitChassisOutput()
     if(chassis_cmd_recv.chassis_mode == CHASSIS_ROTATE)
     {
         // 自旋模式: 速度增强
-        DJIMotorSetRef(motor_lf, vt_lf * 1.25f);
-        DJIMotorSetRef(motor_rf, vt_rf * 1.25f);
-        DJIMotorSetRef(motor_lb, vt_lb * 1.25f);
-        DJIMotorSetRef(motor_rb, vt_rb * 1.25f);
+        DJIMotorSetRef(motor_lf, vt_lf);
+        DJIMotorSetRef(motor_rf, vt_rf);
+        DJIMotorSetRef(motor_lb, vt_lb);
+        DJIMotorSetRef(motor_rb, vt_rb);
     }
     else
     {
@@ -613,22 +613,30 @@ static void LimitChassisOutput()
     }
 
 
-    // 超电错误检测与重启: 检测到错误时发送重启指令，冷却后再次检测
+    // 超电错误检测与重启: 错误码持续一定时间后才发送重启指令，冷却后再次检测
     static uint32_t cooldown = 0;
+    static uint32_t error_cnt = 0;       // 错误码持续计数
+    #define CAP_ERROR_CONFIRM_TIME 250   // 错误确认时间 (250*2ms=500ms)
     uint8_t restart = 0;
     
     if (cooldown > 0) {
         cooldown--;
     } else if (cap->cap_msg.errorCoad != 0) {
-        restart = 1;
-        cooldown = CAP_RESTART_COOLDOWN;
+        error_cnt++;
+        if (error_cnt >= CAP_ERROR_CONFIRM_TIME) {
+            restart = 1;
+            cooldown = CAP_RESTART_COOLDOWN;
+            error_cnt = 0;
+        }
+    } else {
+        error_cnt = 0;  // 错误码恢复正常时清零计数
     }
     
     // 超级电容控制: 发送裁判系统功率限制和能量缓冲区  
     struct CapTxMsg cap_msg = {
         .enableDCDC = enableDCDC,
         .systemRestart = 0, //restart,
-        .RefereePowerLimit = 100,
+        .RefereePowerLimit = CHASSIS_POWER_LIMIT,
         .RefereeEnergyBuffer = 60,
     };
     SuperCapSend(cap, (uint8_t*)&cap_msg);
@@ -840,7 +848,7 @@ void ChassisTask()
         break;
 #endif
     case CHASSIS_ROTATE: // 自旋,同时保持全向机动;当前wz维持定值,后续增加不规则的变速策略
-        chassis_cmd_recv.wz = 1000*rotate_speed_buff;
+        chassis_cmd_recv.wz = 5000*rotate_speed_buff;
         break;
     default:
         break;

@@ -125,7 +125,7 @@ void GimbalInit()
                 .Output_LPF_RC = 0.005,//0.005
                 .Improve = PID_Trapezoid_Intergral | PID_Integral_Limit  | PID_OutputFilter,
                 .IntegralLimit =3000,//3000
-                .MaxOut = 100,//20000
+                .MaxOut = 20000,//20000
             },
             .other_angle_feedback_ptr = &gimba_IMU_data->Pitch,
             // 还需要增加角速度额外反馈指针,注意方向,ins_task.md中有c板的bodyframe坐标系说明

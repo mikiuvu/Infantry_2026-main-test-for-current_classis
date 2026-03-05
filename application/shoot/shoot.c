@@ -302,8 +302,8 @@ void ShootTask()
     }
     else // 关闭摩擦轮
     {
-        DJIMotorOuterLoop(friction_l, CURRENT_LOOP);
-        DJIMotorOuterLoop(friction_r, CURRENT_LOOP);
+        DJIMotorOuterLoop(friction_l, OPEN_LOOP);
+        DJIMotorOuterLoop(friction_r, OPEN_LOOP);
         DJIMotorSetRef(friction_l, 0);
         DJIMotorSetRef(friction_r, 0);
 
