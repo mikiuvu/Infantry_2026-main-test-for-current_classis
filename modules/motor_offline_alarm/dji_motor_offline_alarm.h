@@ -51,9 +51,10 @@
 #define MOTOR_GROUP_MAX_COUNT   4   // 最多电机组数量
 
 // ======================== 默认参数 ========================
-#define ALARM_DEFAULT_CHECK_PERIOD_MS  500   // 默认检测间隔(ms)
+#define ALARM_DEFAULT_CHECK_PERIOD_MS  200   // 默认检测间隔(ms)
 #define ALARM_DEFAULT_BEEP_ON_MS       80    // 默认响持续时间(ms)
-#define ALARM_DEFAULT_BEEP_OFF_MS      500   // 默认间隔时间(ms)
+#define ALARM_DEFAULT_BEEP_OFF_MS      500   // 默认声间间隔时间(ms)
+#define ALARM_DEFAULT_BEEP_TAIL_MS     1200  // 默认两轮报警之间的间隔(ms)
 #define ALARM_FREQ_HIGH                2     // 高音调 (云台/发射)
 #define ALARM_FREQ_LOW                 8     // 低音调 (底盘)
 
@@ -71,6 +72,7 @@ typedef struct {
     uint8_t  beep_times;     // 蜂鸣次数 (也是优先级: 越小越优先)
     uint16_t beep_on_ms;
     uint16_t beep_off_ms;
+    uint16_t beep_tail_ms;   // 两轮报警之间的间隔(ms)
     uint8_t  buzzer_freq;
     uint8_t  valid;          // 请求是否有效
 } AlarmRequest_t;
@@ -82,9 +84,10 @@ typedef struct {
     DJIMotorInstance *motors[MOTOR_GROUP_MAX_SIZE];  // 电机指针数组
     uint8_t beep_times[MOTOR_GROUP_MAX_SIZE];        // 各电机蜂鸣次数 (=优先级)
     uint8_t motor_count;          // 电机数量 (必填)
-    uint16_t check_period_ms;     // 检测间隔(ms), 0=使用默认500ms
-    uint16_t beep_on_ms;          // 蜂鸣响持续时间(ms), 0=使用默认50ms
-    uint16_t beep_off_ms;         // 蜂鸣间隔时间(ms), 0=使用默认500ms
+    uint16_t check_period_ms;     // 检测间隔(ms), 0=使用默认200ms
+    uint16_t beep_on_ms;          // 蜂鸣响持续时间(ms), 0=使用默认80ms
+    uint16_t beep_off_ms;         // 声间间隔时间(ms), 0=使用默认500ms
+    uint16_t beep_tail_ms;        // 两轮报警间隔(ms), 0=使用默认1200ms
     uint8_t buzzer_freq;          // 音调 (ALARM_FREQ_HIGH / ALARM_FREQ_LOW)
     uint8_t run_buzzer_task;      // 1=主调度器(执行BuzzerTask+优先级调度), 0=仅扫描
 } MotorOfflineAlarmConfig_t;
@@ -100,6 +103,7 @@ typedef struct {
     uint16_t check_period_ms;
     uint16_t beep_on_ms;
     uint16_t beep_off_ms;
+    uint16_t beep_tail_ms;
     uint8_t buzzer_freq;
     uint8_t run_buzzer_task;
 

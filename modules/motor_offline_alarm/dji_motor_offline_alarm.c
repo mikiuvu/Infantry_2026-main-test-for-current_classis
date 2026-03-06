@@ -54,6 +54,7 @@ MotorOfflineAlarmInstance* MotorOfflineAlarmRegister(MotorOfflineAlarmConfig_t *
     inst->check_period_ms = config->check_period_ms ? config->check_period_ms : ALARM_DEFAULT_CHECK_PERIOD_MS;
     inst->beep_on_ms     = config->beep_on_ms  ? config->beep_on_ms  : ALARM_DEFAULT_BEEP_ON_MS;
     inst->beep_off_ms    = config->beep_off_ms  ? config->beep_off_ms  : ALARM_DEFAULT_BEEP_OFF_MS;
+    inst->beep_tail_ms   = config->beep_tail_ms ? config->beep_tail_ms : ALARM_DEFAULT_BEEP_TAIL_MS;
     inst->buzzer_freq    = config->buzzer_freq  ? config->buzzer_freq  : ALARM_FREQ_HIGH;
     inst->run_buzzer_task = config->run_buzzer_task;
 
@@ -143,6 +144,7 @@ static void _ScanAndUpdatePending(MotorOfflineAlarmInstance *inst)
             inst->pending.beep_times = inst->beep_times[idx];
             inst->pending.beep_on_ms = inst->beep_on_ms;
             inst->pending.beep_off_ms = inst->beep_off_ms;
+            inst->pending.beep_tail_ms = inst->beep_tail_ms;
             inst->pending.buzzer_freq = inst->buzzer_freq;
             inst->pending.valid       = 1;
             inst->motor_index = (idx + 1) % inst->motor_count;
@@ -199,7 +201,7 @@ void MotorOfflineAlarmTask(MotorOfflineAlarmInstance *instance)
     int8_t best = _PickHighestPriorityGroup();
     if (best >= 0) {
         AlarmRequest_t *req = &_alarm_pool[best].pending;
-        BuzzerBeep(req->beep_times, req->beep_on_ms, req->beep_off_ms, req->buzzer_freq);
+        BuzzerBeep(req->beep_times, req->beep_on_ms, req->beep_off_ms, req->beep_tail_ms, req->buzzer_freq);
         req->valid = 0;  // 已消费
     }
 }

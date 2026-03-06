@@ -244,7 +244,7 @@ void ChassisInit()
     // 注意: 如果注释掉,需要在LimitChassisOutput()中注释掉SuperCapSend()调用
     SuperCap_Init_Config_s cap_conf = {
         .can_config = {
-            .can_handle = &hcan1,
+            .can_handle = &hcan2,
             .tx_id = 0x061, // 超级电容默认接收id通信can1
             .rx_id = 0x051, // 超级电容默认发送id,注意tx和rx在其他人看来是反的
         }};
@@ -616,7 +616,7 @@ static void LimitChassisOutput()
     // 超电错误检测与重启: 错误码持续一定时间后才发送重启指令，冷却后再次检测
     static uint32_t cooldown = 0;
     static uint32_t error_cnt = 0;       // 错误码持续计数
-    #define CAP_ERROR_CONFIRM_TIME 250   // 错误确认时间 (250*2ms=500ms)
+    #define CAP_ERROR_CONFIRM_TIME 500   // 错误确认时间 (500*2ms=1000ms)
     uint8_t restart = 0;
     
     if (cooldown > 0) {
@@ -848,7 +848,7 @@ void ChassisTask()
         break;
 #endif
     case CHASSIS_ROTATE: // 自旋,同时保持全向机动;当前wz维持定值,后续增加不规则的变速策略
-        chassis_cmd_recv.wz = 5000*rotate_speed_buff;
+        chassis_cmd_recv.wz = 10000*rotate_speed_buff;
         break;
     default:
         break;
@@ -887,7 +887,6 @@ void ChassisTask()
     
     ui_data.chassis_mode = chassis_cmd_recv.chassis_mode;
     ui_data.friction_mode = chassis_cmd_recv.friction_mode;
-    ui_data.lid_mode = chassis_cmd_recv.lid_mode;
     ui_data.shoot_mode = chassis_cmd_recv.load_mode;
     ui_data.ui_mode = chassis_cmd_recv.ui_mode;
     ui_data.Pitch_angle = -chassis_cmd_recv.pitch_angle;

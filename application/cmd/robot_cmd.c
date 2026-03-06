@@ -402,11 +402,11 @@ static void RemoteControlSet()
          }
     }
 
-    // 底盘参数,目前没有加入小陀螺(调试似乎暂时没有必要),系数需要调整
+
     // 单位: degree/s (电机转子角速度), 摇杆范围±660, 系数×660=满杆转速
     // M3508最高约54000 degree/s, 45×660≈29700, 留有余量
-    chassis_cmd_send.vx = 70.0f * (float)rc_data[TEMP].rc.rocker_r_; // degree/s
-    chassis_cmd_send.vy = 70.0f * (float)rc_data[TEMP].rc.rocker_r1; // degree/s
+    chassis_cmd_send.vx = 80.0f * (float)rc_data[TEMP].rc.rocker_r_; // degree/s
+    chassis_cmd_send.vy = 80.0f * (float)rc_data[TEMP].rc.rocker_r1; // degree/s
     chassis_cmd_send.dash_mode = DASH_OFF;
     //chassis_cmd_send.wz=5.0f*(float)rc_data[TEMP].rc.rocker_l_;
     
@@ -492,10 +492,6 @@ static void RemoteControlSet()
         }
 #endif
     }
-     if (rc_data[TEMP].rc.dial > 1000)
-        shoot_cmd_send.lid_mode = LID_OPEN;
-    else
-       shoot_cmd_send.lid_mode = LID_CLOSE;
     Limitshoot();
 #endif // CHASSIS_ONLY
 }
@@ -676,12 +672,6 @@ static void ImageRemoteControlSet()
 #endif
     }
 
-    // 弹舱盖
-    if (image_rc_data[TEMP].rc.dial > 1000)
-        shoot_cmd_send.lid_mode = LID_OPEN;
-    else
-        shoot_cmd_send.lid_mode = LID_CLOSE;
-
     Limitshoot();
 }
 
@@ -766,12 +756,6 @@ static void ImageMouseKeySet()
 #endif
     }
 
-    // R键弹舱
-    switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_R] % 2)
-    {
-    case 0:  shoot_cmd_send.lid_mode = LID_CLOSE; break;
-    default: shoot_cmd_send.lid_mode = LID_OPEN;  break;
-    }
     // F键摩擦轮
     switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_F] % 2)
     {
@@ -977,7 +961,6 @@ void RobotCMDTask()
     
     chassis_cmd_send.friction_mode = shoot_cmd_send.friction_mode;
     chassis_cmd_send.gimbal_mode = gimbal_cmd_send.gimbal_mode;
-    chassis_cmd_send.lid_mode = shoot_cmd_send.lid_mode;
     chassis_cmd_send.load_mode = shoot_cmd_send.load_mode;
     chassis_cmd_send.pitch_angle = ((int)(gimbal_fetch_data.gimbal_imu_data.Pitch * 10 + 0.5)) / 10.0;
 

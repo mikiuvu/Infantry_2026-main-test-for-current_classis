@@ -23,9 +23,10 @@ static uint16_t beep_off_ms = 0;     // 间隔时间(ms)
 static uint8_t  beep_freq   = 4;     // 频率等级
 static uint8_t  is_on       = 0;     // 当前是否在响
 
-// --- 尾部静音 (蜂鸣完毕后短暂保持busy,确保听觉间隔) ---
-#define BUZZER_TAIL_SILENCE_MS  80
-static uint8_t tail_silence = 0;
+// --- 尾部静音 (蜂鸣完毕后保持busy,确保两轮报警间隔均匀) ---
+static uint8_t  tail_silence    = 0;
+static uint16_t tail_silence_ms = 0;  // 动态尾部静音时长(ms)
+static uint16_t beep_tail_ms = 0;     // 整轮蜂鸣结束后的静音间隔(ms)
 
 // --- 降调蜂鸣状态 (连续线性递减) ---
 static int16_t  desc_start_val   = 4000;  // 起始计数
@@ -65,7 +66,7 @@ void BuzzerInit(void)
     _BuzzerHwOff();
 }
 
-void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint8_t freq)
+void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint16_t tail_ms, uint8_t freq)
 {
     if (times == 0) { BuzzerOff(); return; }
     if (freq < 1)  freq = 1;
@@ -75,6 +76,7 @@ void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint8_t freq)
     beep_times  = times;
     beep_on_ms  = on_ms;
     beep_off_ms = off_ms;
+    beep_tail_ms = tail_ms;
     beep_freq   = freq;
     is_on        = 1;
     tail_silence = 0;
@@ -105,9 +107,10 @@ void BuzzerTask(void)
 
     // --- 尾部静音: 等待间隔结束后回到IDLE ---
     if (tail_silence) {
-        if (elapsed >= (float)BUZZER_TAIL_SILENCE_MS) {
-            tail_silence = 0;
-            buzzer_mode  = BUZZER_MODE_IDLE;
+        if (elapsed >= (float)tail_silence_ms) {
+            tail_silence    = 0;
+            tail_silence_ms = 0;
+            buzzer_mode     = BUZZER_MODE_IDLE;
         }
         return;
     }
@@ -123,7 +126,8 @@ void BuzzerTask(void)
                 last_transition_ms = now;
                 is_on = 0;
                 if (beep_times == 0) {
-                    tail_silence = 1;  // 最后一声结束,进入尾部静音
+                    tail_silence    = 1;
+                    tail_silence_ms = beep_tail_ms;  // 使用独立的两轮间隔时长
                 }
             }
         } else {
@@ -140,7 +144,8 @@ void BuzzerTask(void)
             // 降调播放完毕
             _BuzzerHwOff();
             last_transition_ms = now;
-            tail_silence = 1;
+            tail_silence    = 1;
+            tail_silence_ms = 200;  // 降调模式尾部静音(ms)
         } else {
             // 线性插值: start_val → end_val, prescaler = val / 1000
             float progress = elapsed / (float)desc_duration_ms;
@@ -170,10 +175,12 @@ BuzzerMode_e BuzzerGetMode(void)
 void BuzzerOff(void)
 {
     _BuzzerHwOff();
-    buzzer_mode  = BUZZER_MODE_IDLE;
-    beep_times   = 0;
-    is_on        = 0;
-    tail_silence = 0;
-    desc_start_val   = 4000;
-    desc_end_val     = 1000;
+    buzzer_mode     = BUZZER_MODE_IDLE;
+    beep_times      = 0;
+    is_on           = 0;
+    tail_silence    = 0;
+    tail_silence_ms = 0;
+    beep_tail_ms    = 0;
+    desc_start_val  = 4000;
+    desc_end_val    = 1000;
 }

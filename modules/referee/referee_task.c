@@ -181,25 +181,6 @@ static void My_UI_Refresh(referee_info_t *referee_recv_info, Referee_Interactive
         Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[1]);
         _Interactive_data->Referee_Interactive_Flag.friction_flag = 0;
     }
-    // 弹仓盖
-    if (_Interactive_data->Referee_Interactive_Flag.lid_flag == 1)
-    {   
-        switch (_Interactive_data->lid_mode)
-        {
-        case LID_CLOSE:
-        {
-            Char_Draw(&UI_State_dyn[2], "sd2", UI_Graph_Change, 8, UI_Color_Green, 15, 2, 185, 650, "close");
-            break;
-        }
-        case LID_OPEN:
-        {
-            Char_Draw(&UI_State_dyn[2], "sd2", UI_Graph_Change, 8, UI_Color_Pink, 15, 2, 185, 650,  "open " );
-            break;
-        }
-        }
-        Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[2]);
-        _Interactive_data->Referee_Interactive_Flag.lid_flag = 0;
-    }
 
     if (_Interactive_data->Referee_Interactive_Flag.chassis_flag == 1)
     {   
@@ -284,12 +265,6 @@ static void Mode_Change_Check(Referee_Interactive_info_t *_Interactive_data)
     {
         _Interactive_data->Referee_Interactive_Flag.friction_flag = 1;
         _Interactive_data->friction_last_mode = _Interactive_data->friction_mode;
-    }
-
-    if (_Interactive_data->lid_mode != _Interactive_data->lid_last_mode)
-    {
-        _Interactive_data->Referee_Interactive_Flag.lid_flag = 1;
-        _Interactive_data->lid_last_mode = _Interactive_data->lid_mode;
     }
 
     if (_Interactive_data->aim_mode != _Interactive_data->last_aim_mode)

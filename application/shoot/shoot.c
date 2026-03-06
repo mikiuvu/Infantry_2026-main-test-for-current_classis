@@ -80,8 +80,6 @@ void ShootTask()
 static DJIMotorInstance *friction_l; // 左摩擦轮
 static DJIMotorInstance *friction_r; // 右摩擦轮
 static DJIMotorInstance *loader;     // 拨盘电机
-static ServoInstance *lid_L;         // 需要增加弹舱盖
-static ServoInstance *lid_R;         // 需要增加弹舱盖
 
 static Publisher_t *shoot_pub;
 static Shoot_Ctrl_Cmd_s shoot_cmd_recv; // 来自gimbal_cmd的发射控制信息
@@ -217,27 +215,6 @@ void ShootInit()
         .motor_type = M2006 // 英雄使用m3508
     };
     loader = DJIMotorInit(&loader_config);
-    Servo_Init_Config_s lid_L_config = {
-        .htim = &htim1,
-        .Channel = TIM_CHANNEL_1,
-        //舵机的初始化模式和类型
-        .Servo_Angle_Type = Start_mode,
-        .Servo_type = Servo270,
-    };
-    // Servo_Init_Config_s lid_R_config={
-    //     .htim=&htim1,
-    //     .Channel=TIM_CHANNEL_2,
-    //     //舵机的初始化模式和类型
-    //     .Servo_Angle_Type=Start_mode,
-    //     .Servo_type=Servo180,
-    // };
-    lid_L = ServoInit(&lid_L_config);
-    // lid_R=ServoInit(&lid_R_config);
-    Servo_Motor_Type_Select(lid_L, Start_mode);
-    //Servo_Motor_Type_Select(lid_R, Start_mode);
-    //Servo_Motor_StartSTOP_Angle_Set(lid_L ,5,120);   //步兵二
-    Servo_Motor_StartSTOP_Angle_Set(lid_L, 160, 270); //步兵一
-    //Servo_Motor_StartSTOP_Angle_Set(lid_R,-5,66);
     shoot_pub = PubRegister("shoot_feed", sizeof(Shoot_Upload_Data_s));
     shoot_sub = SubRegister("shoot_cmd", sizeof(Shoot_Ctrl_Cmd_s));
     
@@ -395,18 +372,6 @@ void ShootTask()
     {
         DJIMotorOuterLoop(loader, ANGLE_LOOP);
         DJIMotorSetRef(loader, 0);
-    }
-
-    // 开关弹舱盖
-    if (shoot_cmd_recv.lid_mode == LID_CLOSE)
-    {
-        Servo_Motor_Type_Select(lid_L, Start_mode);
-       // Servo_Motor_Type_Select(lid_R,Final_mode);  //.
-    }
-    else if (shoot_cmd_recv.lid_mode == LID_OPEN)
-    {
-       Servo_Motor_Type_Select(lid_L, Final_mode);
-        // Servo_Motor_Type_Select(lid_R,Start_mode);   //...
     }
 
     // 反馈数据,目前暂时没有要设定的反馈数据,后续可能增加应用离线监测以及卡弈反馈

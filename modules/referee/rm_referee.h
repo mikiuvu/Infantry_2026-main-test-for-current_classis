@@ -55,7 +55,6 @@ typedef struct
 	uint32_t chassis_flag : 1;
 	uint32_t gimbal_flag : 1;
 	uint32_t shoot_flag : 1;
-	uint32_t lid_flag : 1;
 	uint32_t friction_flag : 1;
 	uint32_t tracking_flag : 1;
 } Referee_Interactive_Flag_t;
@@ -69,7 +68,6 @@ typedef struct
 	chassis_mode_e chassis_mode;			 // 底盘模式	
 	loader_mode_e shoot_mode;				 // 发射模式设置
 	friction_mode_e friction_mode;			 // 摩擦轮关闭
-	lid_mode_e lid_mode;					 // 弹舱盖打开
 	Chassis_Power_Data_s Chassis_Power_Data; // 功率控制
 	uint8_t capEnergy;   					 // 超电能量
 	float Pitch_angle;
@@ -79,7 +77,6 @@ typedef struct
 	chassis_mode_e chassis_last_mode;			
 	loader_mode_e shoot_last_mode;		
 	friction_mode_e friction_last_mode; 
-	lid_mode_e lid_last_mode;			
 	Chassis_Power_Data_s Chassis_last_Power_Data;
 	float Pitch_last_angle;
 	aim_mode_e last_aim_mode;

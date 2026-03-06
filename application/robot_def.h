@@ -56,7 +56,7 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD 5457  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
+#define YAW_CHASSIS_ALIGN_ECD 5516  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
 //#define YAW_CHASSIS_ALIGN_ECD 2030  //步兵二
 #define YAW_ECD_GREATER_THAN_4096 1 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
@@ -75,9 +75,9 @@
 #define REVERSE_ANGLE_RATIO 1.0f       // 反转角度系数，不建议修改 1.0
 
 // 发射参数
-#define ONE_BULLET_DELTA_ANGLE 45   // 发射一发弹丸拨盘转动的距离,由机械设计图纸给出
+#define ONE_BULLET_DELTA_ANGLE 36   // 发射一发弹丸拨盘转动的距离,由机械设计图纸给出
 #define REDUCTION_RATIO_LOADER 36.0f // 拨盘电机的减速比,英雄需要修改为3508的19.0f
-#define NUM_PER_CIRCLE 8             // 拨盘一圈的装载量
+#define NUM_PER_CIRCLE 10             // 拨盘一圈的装载量
 // 机器人底盘修改的参数,单位为mm(毫米)
 #define WHEEL_BASE 311              // 纵向轴距(前进后退方向)
 #define TRACK_WIDTH 311             // 横向轮距(左右平移方向)
@@ -194,12 +194,6 @@ typedef enum
 
 typedef enum
 {
-    LID_OPEN = 1, // 弹舱盖打开
-    LID_CLOSE,    // 弹舱盖关闭
-} lid_mode_e;
-
-typedef enum
-{
     LOAD_STOP = 0,  // 停止发射
     LOAD_REVERSE,   // 反转
     LOAD_1_BULLET,  // 单发
@@ -258,7 +252,6 @@ typedef struct
     // UI部分
     ui_mode_e ui_mode;
     gimbal_mode_e gimbal_mode;
-    lid_mode_e lid_mode;
     friction_mode_e friction_mode;
     loader_mode_e load_mode;
     SuperCap_Mode_e super_cap;
@@ -282,7 +275,6 @@ typedef struct
 {
     shoot_mode_e shoot_mode;
     loader_mode_e load_mode;
-    lid_mode_e lid_mode;
     friction_mode_e friction_mode;
     Bullet_Speed_e bullet_speed; // 弹速枚举
     uint8_t rest_heat;

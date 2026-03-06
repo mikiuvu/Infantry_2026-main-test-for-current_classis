@@ -22,10 +22,11 @@ void BuzzerInit(void);
  * @param times 蜂鸣次数 (1-255)
  * @param on_ms 每声持续时间(ms)
  * @param off_ms 声音间隔时间(ms)
+ * @param tail_ms 整轮蜂鸣结束后的静音间隔(ms), 用于控制两轮报警之间的间隔
  * @param freq 频率等级 (1-10, 1最高音, 10最低音)
  * @note 内部使用DWT计时,调用频率不限
  */
-void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint8_t freq);
+void BuzzerBeep(uint8_t times, uint16_t on_ms, uint16_t off_ms, uint16_t tail_ms, uint8_t freq);
 
 /**
  * @brief 播放连续降调蜂鸣 (用于全部离线警报)
