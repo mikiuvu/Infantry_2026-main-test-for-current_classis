@@ -4,17 +4,17 @@
  * @note 特性:
  *       1. BSP层纯硬件抽象, 所有定时/调度逻辑在本模块
  *       2. 7状态机: SILENCE → IDLE → BEEP_ON/OFF → TAIL → DESC → DESC_COOL
- *       3. 上电静默期 + 全部离线降调警报 + 优先级调度
+ *       3. 全部离线降调警报 + 优先级调度
  *
  * ======================= 使用方法 =======================
  *
  * 1. 在Init函数中注册:
  *    MotorOfflineAlarmConfig_t cfg = {
  *        .motors = {yaw_motor, pitch_motor},
- *        .beep_times = {1, 2},       // 响声次数=优先级(少的先响)
- *        .motor_count = 2,
- *        .buzzer_freq = ALARM_FREQ_HIGH,
- *        .run_buzzer_task = 1,       // 主模块负责状态机调度
+ *        .beep_times = {1, 2},       // 响声次数, 轮询报警
+ *        .buzzer_freq = ALARM_FREQ_HIGH, //可直接填1-10的频率等级，也可使用预设值
+ *        .run_buzzer_task = 1,       // 主模块负责状态机调度，比如这里已在gimbal_motor组设置为1, 则shoot_motor组设置为0
+ *                                    // 其他参数可选, 不填则使用默认值
  *    };
  *    alarm_inst = MotorOfflineAlarmRegister(&cfg);
  *
@@ -39,21 +39,21 @@
 #define ALARM_DEFAULT_BEEP_ON_MS       100    // 默认响持续时间(ms)
 #define ALARM_DEFAULT_BEEP_OFF_MS      300   // 默认声间间隔时间(ms)
 #define ALARM_DEFAULT_BEEP_TAIL_MS     1000  // 默认两轮报警间隔(ms)
-#define ALARM_FREQ_HIGH                5     // 高音调 (云台/发射)
-#define ALARM_FREQ_LOW                 8     // 低音调 (底盘)
+#define ALARM_FREQ_HIGH                500     // 高音调 (云台/发射)
+#define ALARM_FREQ_LOW                 800     // 低音调 (底盘)
 
 /**
  * @brief 电机离线检测组配置 (初始化时填写)
  */
 typedef struct {
-    DJIMotorInstance *motors[MOTOR_GROUP_MAX_SIZE];  // 电机指针数组
+    DJIMotorInstance *motors[MOTOR_GROUP_MAX_SIZE];  // 电机指针数组 (自动计数非NULL项)
     uint8_t beep_times[MOTOR_GROUP_MAX_SIZE];        // 各电机蜂鸣次数 (=优先级, 越少越优先)
-    uint8_t motor_count;          // 电机数量 (必填)
+    uint8_t motor_count;          // 电机数量, 0=自动计数motors[]中非NULL项
     uint16_t check_period_ms;     // 检测间隔(ms), 0=使用默认200ms
     uint16_t beep_on_ms;          // 蜂鸣响持续时间(ms), 0=使用默认100ms
     uint16_t beep_off_ms;         // 声间间隔时间(ms), 0=使用默认300ms
     uint16_t beep_tail_ms;        // 两轮报警间隔(ms), 0=使用默认1000ms
-    uint8_t buzzer_freq;          // 音调 (ALARM_FREQ_HIGH / ALARM_FREQ_LOW)
+    uint16_t buzzer_freq;          // 音调 (1=最高音, 值越大越低沉, 范围1~1000)
     uint8_t run_buzzer_task;      // 1=主调度器(驱动状态机), 0=仅扫描
 } MotorOfflineAlarmConfig_t;
 
@@ -68,7 +68,7 @@ typedef struct {
     uint16_t beep_on_ms;
     uint16_t beep_off_ms;
     uint16_t beep_tail_ms;
-    uint8_t buzzer_freq;
+    uint16_t buzzer_freq;
     uint8_t run_buzzer_task;
     uint8_t offline_count;        // 当前离线电机数
     float last_check_ms;          // 上次检测DWT时间戳(ms)

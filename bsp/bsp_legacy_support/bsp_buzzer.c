@@ -15,10 +15,10 @@ void BuzzerInit(void)
     BuzzerOff();
 }
 
-void BuzzerOn(uint8_t freq)
+void BuzzerOn(uint16_t freq)
 {
-    if (freq < 1)  freq = 1;
-    if (freq > 10) freq = 10;
+    if (freq < 1)   freq = 1;
+    if (freq > 1000) freq = 1000;
     __HAL_TIM_PRESCALER(&htim4, freq);
     __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, 5000);
 }

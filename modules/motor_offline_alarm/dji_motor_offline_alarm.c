@@ -36,7 +36,7 @@ static float    _state_ts = 0;        // 进入当前状态的时间戳(ms)
 
 // 当前蜂鸣上下文
 static uint8_t  _beep_remaining = 0;  // 剩余蜂鸣次数
-static uint8_t  _beep_freq = ALARM_FREQ_HIGH;
+static uint16_t _beep_freq = ALARM_FREQ_HIGH;
 static uint16_t _beep_on_ms  = ALARM_DEFAULT_BEEP_ON_MS;
 static uint16_t _beep_off_ms = ALARM_DEFAULT_BEEP_OFF_MS;
 static uint16_t _beep_tail_ms = ALARM_DEFAULT_BEEP_TAIL_MS;
@@ -54,14 +54,22 @@ static void _EnterState(_State_e st, float now)
 
 MotorOfflineAlarmInstance* MotorOfflineAlarmRegister(MotorOfflineAlarmConfig_t *config)
 {
-    if (!config || config->motor_count == 0 ||
-        config->motor_count > MOTOR_GROUP_MAX_SIZE ||
-        _pool_count >= MOTOR_GROUP_MAX_COUNT)
+    if (!config || _pool_count >= MOTOR_GROUP_MAX_COUNT)
+        return NULL;
+
+    // 自动计数: 若motor_count为0,则遍历motors[]数非NULL指针
+    uint8_t count = config->motor_count;
+    if (count == 0) {
+        for (uint8_t i = 0; i < MOTOR_GROUP_MAX_SIZE; i++) {
+            if (config->motors[i] != NULL) count++;
+        }
+    }
+    if (count == 0 || count > MOTOR_GROUP_MAX_SIZE)
         return NULL;
 
     MotorOfflineAlarmInstance *inst = &_pool[_pool_count++];
     memset(inst, 0, sizeof(*inst));
-    inst->motor_count     = config->motor_count;
+    inst->motor_count     = count;
     inst->check_period_ms = config->check_period_ms ? config->check_period_ms : ALARM_DEFAULT_CHECK_PERIOD_MS;
     inst->beep_on_ms      = config->beep_on_ms  ? config->beep_on_ms  : ALARM_DEFAULT_BEEP_ON_MS;
     inst->beep_off_ms     = config->beep_off_ms  ? config->beep_off_ms  : ALARM_DEFAULT_BEEP_OFF_MS;
@@ -69,7 +77,7 @@ MotorOfflineAlarmInstance* MotorOfflineAlarmRegister(MotorOfflineAlarmConfig_t *
     inst->buzzer_freq     = config->buzzer_freq  ? config->buzzer_freq  : ALARM_FREQ_HIGH;
     inst->run_buzzer_task = config->run_buzzer_task;
     inst->last_check_ms   = DWT_GetTimeline_ms();
-    for (uint8_t i = 0; i < config->motor_count; i++) {
+    for (uint8_t i = 0; i < count; i++) {
         inst->motors[i]     = config->motors[i];
         inst->beep_times[i] = config->beep_times[i];
     }
@@ -109,7 +117,7 @@ static uint8_t _AllMotorsOffline(void)
  * @brief 轮询选取下一个离线电机,并输出其组的时间参数
  * @note 从 _rr_index 开始扫描,找到后将 _rr_index 推进到下一个位置
  */
-static uint8_t _FindNextOffline(uint8_t *out_freq, uint8_t *out_times,
+static uint8_t _FindNextOffline(uint16_t *out_freq, uint8_t *out_times,
                                  uint16_t *out_on, uint16_t *out_off, uint16_t *out_tail)
 {
     // 计算所有组的电机总数
@@ -159,7 +167,8 @@ static void _RunStateMachine(void)
             break;
         }
         // 轮询找下一个离线电机
-        uint8_t freq, times;
+        uint16_t freq;
+        uint8_t times;
         uint16_t on_ms, off_ms, tail_ms;
         if (_FindNextOffline(&freq, &times, &on_ms, &off_ms, &tail_ms)) {
             _beep_remaining = times;
