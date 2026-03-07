@@ -3,9 +3,8 @@
 #include "robot_cmd.h"
 // module
 #include "remote_control.h"
-#ifdef USE_IMAGE_REMOTE
 #include "transfer_image.h"
-#endif
+#include <string.h>
 #include "ins_task.h"
 #include "vofa.h"
 // ======================== 视觉通信协议条件编译 ========================
@@ -42,11 +41,8 @@ static Subscriber_t *chassis_feed_sub; // 底盘反馈信息订阅者
 static Chassis_Ctrl_Cmd_s chassis_cmd_send;      // 发送给底盘应用的信息,包括控制信息和UI绘制相关
 static Chassis_Upload_Data_s chassis_fetch_data; // 从底盘应用接收的反馈信息信息,底盘功率枪口热量与底盘运动状态等
 
-#ifdef USE_IMAGE_REMOTE
+static RC_ctrl_t *rc_data;              // DJI遥控器数据
 static Image_RC_ctrl_t *image_rc_data;  // 图传遥控器数据
-#else
-static RC_ctrl_t *rc_data;              // 遥控器数据,初始化时返回
-#endif
 static float yaw_diff;
 
 // ======================== 视觉数据指针 - 根据协议类型条件编译 ========================
@@ -75,6 +71,9 @@ static Robot_Status_e robot_state; // 机器人整体工作状态
 static float chassis_speed_buff;
 static Work_Mode_e vision_work_mode;
 
+uint8_t remote_flag = 0;  // 遥控器类型选择: 0=未选择, 1=DJI遥控(键鼠), 2=图传遥控
+uint8_t stop_flag = 0;    // 停止标志: 0=运行, 1=停止 (图传userkey左右同时按下切换)
+
 /**
  * @brief 二段灵敏度计算函数
  * @param rocker_value 摇杆值 (死区处理后)
@@ -97,7 +96,6 @@ static float TwoStageSensitivity(int16_t rocker_value, float low_sens, float hig
  * @brief 视觉模式下摇杆微调 (二段灵敏度)
  * @note 小幅度精细控制，大幅度快速切换目标
  */
-#ifndef USE_IMAGE_REMOTE
 static void VisionRockerAdjust(void)
 {
     // 死区处理
@@ -112,17 +110,6 @@ static void VisionRockerAdjust(void)
     gimbal_cmd_send.yaw -= TwoStageSensitivity(rocker_l_filtered, 0.0003f, 0.0012f, 300);
     gimbal_cmd_send.pitch -= TwoStageSensitivity(rocker_l1_filtered, 0.00025f, 0.001f, 300);
 }
-#else
-static void ImageVisionRockerAdjust(void)
-{
-    int16_t lx = image_rc_data[TEMP].rc.rocker_l_x;
-    int16_t ly = image_rc_data[TEMP].rc.rocker_l_y;
-    if (lx <= 10 && lx >= -10) lx = 0;
-    if (ly <= 10 && ly >= -10) ly = 0;
-    gimbal_cmd_send.yaw -= TwoStageSensitivity(lx, 0.0003f, 0.0012f, 300);
-    gimbal_cmd_send.pitch -= TwoStageSensitivity(ly, 0.00025f, 0.001f, 300);
-}
-#endif // USE_IMAGE_REMOTE
 
 #ifdef OUTBREAK_PRIORITY
 static void Limitshoot()
@@ -175,11 +162,8 @@ static void Limitshoot()
 
 void RobotCMDInit()
 {
-#ifdef USE_IMAGE_REMOTE
-    image_rc_data = TransferImageInit(&huart6); // 图传遥控器使用UART6
-#else
-    rc_data = RemoteControlInit(&huart3);   // 修改为对应串口,注意如果是自研板dbus协议串口需选用添加了反相器的那个
-#endif
+    rc_data = RemoteControlInit(&huart3);       // DJI遥控器: USART3 (DBUS)
+    image_rc_data = TransferImageInit(&huart6); // 图传遥控器: USART6
     
 #ifdef CHASSIS_ONLY
     // ===================== CHASSIS_ONLY模式: 只初始化底盘 =====================
@@ -217,7 +201,11 @@ void RobotCMDInit()
     gimbal_cmd_send.pitch = 0;
     gimbal_cmd_send.yaw = 0;
     gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
-    robot_state = ROBOT_READY; // 启动时机器人进入工作模式,后续加入所有应用初始化完成之后再进入
+    chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
+    shoot_cmd_send.shoot_mode = SHOOT_OFF;
+    shoot_cmd_send.friction_mode = FRICTION_OFF;
+    shoot_cmd_send.load_mode = LOAD_STOP;
+    robot_state = ROBOT_STOP; // 上电默认停止, 需遥控器在线且拨杆正确才能恢复
 #endif // CHASSIS_ONLY
 }
 
@@ -252,10 +240,10 @@ static void CalcOffsetAngle()
  * @brief 控制输入为遥控器(调试时)的模式和控制量设置
  *
  */
-#ifndef USE_IMAGE_REMOTE
 static void RemoteControlSet()
 {
     chassis_cmd_send.chassis_power_buff = 1;
+    shoot_cmd_send.shoot_mode = SHOOT_ON;
     
 #ifdef CHASSIS_ONLY
     // ===================== CHASSIS_ONLY模式: 仅底盘控制 =====================
@@ -439,23 +427,9 @@ static void RemoteControlSet()
         // ======================== 根据协议类型获取视觉发射指令 ========================
         // 只有跟踪和开火标志位都为1时才开启摩擦轮，并允许通过拨轮控制拨弹盘
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        // // VCP/UART协议: 跟踪(tracking==1)且开火(fire==1)时才允许开火
-        // if (vision_recv_data->tracking == 1 && vision_recv_data->fire == 1)
-        // {
-        //     shoot_cmd_send.friction_mode = FRICTION_ON;  // 摩擦轮常开
-        //     // 通过拨轮控制拨弹盘: 拨轮向上(<-300)连发, 向下(>300)单发
-        //     if (rc_data[TEMP].rc.dial < -300)
-        //         shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-        //     else if (rc_data[TEMP].rc.dial > 300)
-        //         shoot_cmd_send.load_mode = LOAD_1_BULLET;
-        //     else
-        //         shoot_cmd_send.load_mode = LOAD_STOP;
-        // }
-        // else
-        // {
-        //     shoot_cmd_send.friction_mode = FRICTION_OFF;
-        //     shoot_cmd_send.load_mode = LOAD_STOP;
-        // }
+        // VCP/UART协议: 视觉fire=1且未手动拨弹时自动开火
+        if (vision_recv_data->fire == 1 && shoot_cmd_send.load_mode == LOAD_STOP)
+            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
 #elif defined(VISION_USE_SERIALPORT)
         // SerialPort协议: 使用shootStatus字段 (非0=跟踪且开火, 0=停火)
         if (vision_recv_data_sp->shootStatus != 0)
@@ -495,7 +469,6 @@ static void RemoteControlSet()
     Limitshoot();
 #endif // CHASSIS_ONLY
 }
-#endif // !USE_IMAGE_REMOTE (RemoteControlSet)
 
 /**
  * @brief  紧急停止,包括遥控器左上侧拨轮打满/重要模块离线/双板通信失效等
@@ -504,7 +477,6 @@ static void RemoteControlSet()
  * @todo   后续修改为遥控器离线则电机停止(关闭遥控器急停),通过给遥控器模块添加daemon实现
  *
  */
-#ifndef USE_IMAGE_REMOTE
 static void EmergencyHandler()
 {
 #ifdef CHASSIS_ONLY
@@ -523,156 +495,34 @@ static void EmergencyHandler()
     }
 #else
     // ===================== 完整模式 =====================
-    if (switch_is_down(rc_data[TEMP].rc.switch_left) || switch_is_mid(rc_data[TEMP].rc.switch_left)) // 遥控器左侧开关状态为[下/中],遥控器控制
-    {
-        if (robot_state == ROBOT_STOP || !RemoteControlIsOnline()) // 还需添加重要应用和模块离线的判断
-        {
-            robot_state = ROBOT_STOP;
-            gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
-            chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
-            shoot_cmd_send.shoot_mode = SHOOT_OFF;
-            shoot_cmd_send.friction_mode = FRICTION_OFF;
-            shoot_cmd_send.load_mode = LOAD_STOP;
-
-            gimbal_cmd_send.yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle; // 急停时设定值保持与实际值同步，避免恢复时疯转
-            gimbal_cmd_send.pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
-        }
-        // 右拨杆为[中],恢复正常运行
-        if (switch_is_mid(rc_data[TEMP].rc.switch_right) && RemoteControlIsOnline())
-        {
-            robot_state = ROBOT_READY;
-            shoot_cmd_send.shoot_mode = SHOOT_ON;
-        }
-    }
-    // else if (switch_is_mid(rc_data[TEMP].rc.switch_left)) // 遥控器左侧开关状态为[中],视觉模式
-    // {
-    //     // 视觉模式下允许发射(激光笔需要)
-    //     if (robot_state == ROBOT_STOP || rc_data[TEMP].rc.dial >= 640 || !RemoteControlIsOnline())
-    //     {
-    //         robot_state = ROBOT_STOP;
-    //         shoot_cmd_send.shoot_mode = SHOOT_OFF;
-    //     }
-    //     else
-    //     {
-    //         robot_state = ROBOT_READY;
-    //         shoot_cmd_send.shoot_mode = SHOOT_ON;  // 视觉模式下允许发射
-    //     }
-    // }
+    // 与参考实现一致: EmergencyHandler由RobotCMDTask中的丢控保护替代
 #endif // CHASSIS_ONLY
     
 }
-#endif // !USE_IMAGE_REMOTE (EmergencyHandler)
 
-/* ======================== 图传遥控器控制函数 ======================== */
-#ifdef USE_IMAGE_REMOTE
+/* ======================== 图传遥控器 → DJI遥控器 数据转写 ======================== */
 
 /**
- * @brief 图传遥控器 - 摇杆控制模式 (switch_sw == MID)
- * @note  左摇杆控制云台, 右摇杆控制底盘
- *        userkey_right: 按下时小陀螺, 松开跟随云台
- *        userkey_left:  按下时开启视觉自瞄
- *        trigger: 发射
+ * @brief 将图传遥控器数据转写到DJI遥控器数据结构, 实现统一控制路径
+ * @note  与参考实现一致: switch_sw映射到switch_right, switch_left由remote_flag控制
+ *        switch_sw映射: IMAGE(1/2/3) → DJI switch_right(1/3/2)
+ *        trigger覆盖dial为500
  */
-static void ImageRemoteControlSet()
+static void image_rc_data_To_rc_data_t(void)
 {
-    chassis_cmd_send.chassis_power_buff = 1;
-    gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
-
-    // 底盘模式: userkey_right按下时小陀螺, 否则跟随云台
-    if (image_rc_data[TEMP].rc.userkey_right)
-        chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
-    else
-        chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
-
-    // 云台控制: 左摇杆 (死区处理)
-    int16_t lx = image_rc_data[TEMP].rc.rocker_l_x;
-    int16_t ly = image_rc_data[TEMP].rc.rocker_l_y;
-    if (lx <= 10 && lx >= -10) lx = 0;
-    if (ly <= 10 && ly >= -10) ly = 0;
-
-    // 视觉自瞄: userkey_left按下时启用
-    uint8_t no_target = 0;
-#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-    no_target = (vision_recv_data->tracking == NO_TARGET);
-#elif defined(VISION_USE_SERIALPORT)
-    no_target = (vision_recv_data_sp->shootStatus == 0);
-#elif defined(VISION_USE_SP)
-    no_target = (vision_recv_sp->mode == 0);
-#endif
-
-    if (image_rc_data[TEMP].rc.userkey_left && !no_target)
+    rc_data[TEMP].rc.dial = image_rc_data[TEMP].rc.dial;
+    rc_data[TEMP].rc.rocker_l_ = image_rc_data[TEMP].rc.rocker_l_x;
+    rc_data[TEMP].rc.rocker_l1 = image_rc_data[TEMP].rc.rocker_l_y;
+    rc_data[TEMP].rc.rocker_r_ = image_rc_data[TEMP].rc.rocker_r_x;
+    rc_data[TEMP].rc.rocker_r1 = image_rc_data[TEMP].rc.rocker_r_y;
+    switch (image_rc_data[TEMP].rc.switch_sw)
     {
-        // 视觉模式
-#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        if (vision_recv_data->aimYaw > 180.0f)
-            vision_recv_data->aimYaw -= 360.0f;
-        yaw_diff = (vision_recv_data->aimYaw == 0 ? 0 : vision_recv_data->aimYaw - gimbal_cmd_send.yaw);
-        yaw_diff = loop_float_constrain(yaw_diff, -45.0f, 45.0f);
-        gimbal_cmd_send.yaw += yaw_diff;
-        gimbal_cmd_send.pitch = vision_recv_data->aimPitch;
-#elif defined(VISION_USE_SERIALPORT)
-        if (vision_recv_data_sp->yaw != 0 || vision_recv_data_sp->pitch != 0) {
-            gimbal_cmd_send.yaw = (float)vision_recv_data_sp->yaw / 100.0f;
-            gimbal_cmd_send.pitch = (float)vision_recv_data_sp->pitch / 100.0f;
-        }
-#elif defined(VISION_USE_SP)
-        if (vision_recv_sp->mode != 0) {
-            gimbal_cmd_send.yaw = vision_recv_sp->yaw;
-            gimbal_cmd_send.pitch = vision_recv_sp->pitch;
-        }
-#endif
-        ImageVisionRockerAdjust();
-        chassis_cmd_send.aim_mode = AIM_ON;
+    case 0x01: rc_data[TEMP].rc.switch_right = 1; break; // UP→UP
+    case 0x02: rc_data[TEMP].rc.switch_right = 3; break; // MID→MID
+    case 0x03: rc_data[TEMP].rc.switch_right = 2; break; // DOWN→DOWN
     }
-    else
-    {
-        // 纯摇杆控制
-        gimbal_cmd_send.yaw -= 0.002f * (float)lx;
-        gimbal_cmd_send.pitch -= 0.0015f * (float)ly;
-        chassis_cmd_send.aim_mode = AIM_OFF;
-    }
-
-    // pitch软件限位
-    if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
-        gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
-    if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
-        gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
-
-    // 底盘控制: 右摇杆
-    chassis_cmd_send.vx = 45.0f * (float)image_rc_data[TEMP].rc.rocker_r_x;
-    chassis_cmd_send.vy = 45.0f * (float)image_rc_data[TEMP].rc.rocker_r_y;
-    chassis_cmd_send.dash_mode = DASH_OFF;
-
-    // 摩擦轮控制: 拨轮向上超过100开启
-    if (image_rc_data[TEMP].rc.dial < -100)
-        shoot_cmd_send.friction_mode = FRICTION_ON;
-    else
-        shoot_cmd_send.friction_mode = FRICTION_OFF;
-
-    // 拨弹控制: trigger或拨轮大幅度
     if (image_rc_data[TEMP].rc.trigger)
-        shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-    else if (image_rc_data[TEMP].rc.dial < -300)
-        shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-    else if (image_rc_data[TEMP].rc.dial > 300)
-        shoot_cmd_send.load_mode = LOAD_1_BULLET;
-    else
-        shoot_cmd_send.load_mode = LOAD_STOP;
-
-    // 视觉模式下摩擦轮常开
-    if (image_rc_data[TEMP].rc.userkey_left)
-    {
-        shoot_cmd_send.friction_mode = FRICTION_ON;
-#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        if (vision_recv_data->fire == 1 && !image_rc_data[TEMP].rc.trigger)
-            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-#elif defined(VISION_USE_SP)
-        if (vision_recv_sp->mode == 2 && !image_rc_data[TEMP].rc.trigger)
-            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-#endif
-    }
-
-    Limitshoot();
+        rc_data[TEMP].rc.dial = 500;
 }
 
 /**
@@ -792,54 +642,6 @@ static void ImageMouseKeySet()
         shoot_cmd_send.load_mode = LOAD_STOP;
 }
 
-/**
- * @brief 图传遥控器 - 紧急停止处理
- * @note  switch DOWN / key_stop / 离线 触发紧急停止
- */
-static void ImageEmergencyHandler()
-{
-    // 紧急停止条件: 开关下拨 / 停止按钮 / 离线
-    if (img_switch_is_down(image_rc_data[TEMP].rc.switch_sw) ||
-        image_rc_data[TEMP].rc.key_stop ||
-        !ImageRemoteIsOnline())
-    {
-        robot_state = ROBOT_STOP;
-        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
-        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
-        shoot_cmd_send.shoot_mode = SHOOT_OFF;
-        shoot_cmd_send.friction_mode = FRICTION_OFF;
-        shoot_cmd_send.load_mode = LOAD_STOP;
-        gimbal_cmd_send.yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
-        gimbal_cmd_send.pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
-        return;
-    }
-
-    // 不在紧急停止状态, 恢复运行
-    if (robot_state == ROBOT_STOP)
-    {
-        robot_state = ROBOT_READY;
-        shoot_cmd_send.shoot_mode = SHOOT_ON;
-    }
-
-    // 键盘模式下 Ctrl+C 急停
-    if (img_switch_is_up(image_rc_data[TEMP].rc.switch_sw))
-    {
-        if (image_rc_data[TEMP].key_count[KEY_PRESS_WITH_CTRL][Key_C] % 2 != 0)
-        {
-            robot_state = ROBOT_STOP;
-            gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
-            chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
-            shoot_cmd_send.shoot_mode = SHOOT_OFF;
-            shoot_cmd_send.friction_mode = FRICTION_OFF;
-            shoot_cmd_send.load_mode = LOAD_STOP;
-            gimbal_cmd_send.yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
-            gimbal_cmd_send.pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
-        }
-    }
-}
-
-#endif // USE_IMAGE_REMOTE
-
 /* 机器人核心控制任务,200Hz频率运行(必须高于视觉发送频率) */
 void RobotCMDTask()
 {
@@ -858,36 +660,64 @@ void RobotCMDTask()
     PubPushMessage(chassis_cmd_pub, (void *)&chassis_cmd_send);
 
 #else
-    // ===================== 完整模式 =====================
+    // ===================== 完整模式: 图传优先, 简化逻辑 =====================
     chassis_cmd_send.ui_mode = UI_KEEP;
+
     // 从其他应用获取回传数据
 #ifdef GIMBAL_BOARD
     // chassis_fetch_data = *(Chassis_Upload_Data_s *)CANCommGet(cmd_can_comm);
 #endif // GIMBAL_BOARD
     SubGetMessage(shoot_feed_sub, &shoot_fetch_data);
     SubGetMessage(gimbal_feed_sub, &gimbal_fetch_data);
-
-    // 根据gimbal的反馈值计算云台和底盘正方向的夹角,不需要传参,通过static私有变量完成
     CalcOffsetAngle();
 
-#ifdef USE_IMAGE_REMOTE
-    // 图传遥控器: switch_sw控制模式切换
-    if (img_switch_is_mid(image_rc_data[TEMP].rc.switch_sw))
-        ImageRemoteControlSet();
-    else if (img_switch_is_up(image_rc_data[TEMP].rc.switch_sw))
-        ImageMouseKeySet();
-    // switch DOWN → 由ImageEmergencyHandler处理为零力矩
+    // ======== 控制源选择: 图传优先, 两者都离线则失能 ========
+    if (ImageRemoteIsOnline())
+    {
+        // 图传急停: switch DOWN / key_stop
+        if (image_rc_data[TEMP].rc.switch_sw == IMAGE_SW_DOWN ||
+            image_rc_data[TEMP].rc.key_stop)
+        {
+            rc_data[TEMP].rc.switch_right = 0;
+        }
+        else
+        {
+            // 转写图传数据到rc_data (摇杆 + switch_right)
+            image_rc_data_To_rc_data_t();
+            // 模式选择: UP→键鼠(1), MID→摇杆(2)
+            rc_data[TEMP].rc.switch_left =
+                (image_rc_data[TEMP].rc.switch_sw == IMAGE_SW_UP) ? 1 : 2;
+            // 拷贝鼠标键盘数据
+            memcpy(&rc_data[TEMP].mouse, &image_rc_data[TEMP].mouse, sizeof(rc_data[TEMP].mouse));
+            memcpy(&rc_data[TEMP].key, &image_rc_data[TEMP].key, sizeof(rc_data[TEMP].key));
+        }
+    }
+    else if (!RemoteControlIsOnline())
+    {
+        // 两个遥控器都离线 → 失能
+        rc_data[TEMP].rc.switch_right = 0;
+    }
+    // DJI在线且图传离线 → rc_data由sbus_to_rc自动填充, 无需处理
 
-    ImageEmergencyHandler();
-#else
-    // 原遥控器: 左侧开关控制模式切换
-    if (switch_is_down(rc_data[TEMP].rc.switch_left) || switch_is_mid(rc_data[TEMP].rc.switch_left)) // 遥控器控制
-        RemoteControlSet();
-        VOFA(vision_recv_data->aimPitch,yaw_diff,gimbal_cmd_send.pitch
-            ,gimbal_fetch_data.gimbal_imu_data.Pitch,gimbal_fetch_data.gimbal_imu_data.Yaw); 
-
-    EmergencyHandler(); // 处理模块离线和遥控器急停等紧急情况
-#endif
+    // ======== 丢控保护: switch_right==0 → 全部零力矩 ========
+    if (rc_data[TEMP].rc.switch_right == 0)
+    {
+        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
+        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
+        shoot_cmd_send.shoot_mode = SHOOT_OFF;
+        shoot_cmd_send.friction_mode = FRICTION_OFF;
+        shoot_cmd_send.load_mode = LOAD_STOP;
+        gimbal_cmd_send.yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
+        gimbal_cmd_send.pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
+    }
+    else
+    {
+        // ======== 统一控制路径 ========
+        if (switch_is_down(rc_data[TEMP].rc.switch_left) || switch_is_mid(rc_data[TEMP].rc.switch_left))
+            RemoteControlSet();
+        else if (switch_is_up(rc_data[TEMP].rc.switch_left))
+            ImageMouseKeySet();
+    }
 
     shoot_cmd_send.bullet_speed = chassis_fetch_data.bullet_speed;
     
@@ -914,12 +744,8 @@ void RobotCMDTask()
     // 时间戳
     vision_send_data_sp.time_stamp = DWT_GetTimeline_ms();
     
-    // 右击状态 (鼠标右键或其他准备状态)
-#ifdef USE_IMAGE_REMOTE
-    vision_send_data_sp.right_clicked = (image_rc_data[TEMP].mouse.press_r ? 1 : 0);
-#else
+    // 右击状态 (鼠标右键或其他准备状态, 转写模式下rc_data已包含图传数据)
     vision_send_data_sp.right_clicked = (rc_data[TEMP].mouse.press_r ? 1 : 0);
-#endif
     
     // 用户时间偏差/弹速
     vision_send_data_sp.user_time_bias = (int8_t)chassis_fetch_data.bullet_speed;

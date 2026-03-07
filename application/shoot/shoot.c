@@ -5,7 +5,7 @@
 #include "bsp_dwt.h"
 #include "general_def.h"
 #include "servo_motor.h"
-#include "dji_motor_offline_alarm.h" // 电机离线检测
+#include "motor_offline_alarm.h" // 电机离线检测
 
 #ifdef USE_LASER_POINTER
 /* ======================== 激光笔模式 ======================== */

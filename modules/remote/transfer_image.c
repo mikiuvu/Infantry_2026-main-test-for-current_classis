@@ -16,20 +16,26 @@ static uint8_t image_init_flag = 0;
 static DaemonInstance *image_daemon_instance;
 static USARTInstance *image_usart_instance;
 
+uint8_t enable_flag = 0; // 图传遥控器使能标志, 收到数据置1, 离线置0
+
+uint8_t r_recv_buff[100]; // 调试用: 保存最近一帧原始数据
+volatile uint32_t image_rx_cnt = 0;     // 调试用: 回调触发次数
+volatile uint32_t image_sof_fail = 0;   // 调试用: SOF校验失败次数
+volatile uint32_t image_crc_fail = 0;   // 调试用: CRC校验失败次数
+
 /**
- * @brief 图传遥控器协议解析
+ * @brief 图传遥控器协议解析 (与参考实现一致: 先解析再CRC校验)
  * @param image_buf 原始串口接收缓冲区
  */
 static void ana_image_rc(const uint8_t *image_buf)
 {
     if (image_buf[0] != IMAGE_FIRST_SOF || image_buf[1] != IMAGE_SECOND_SOF)
+    {
+        image_sof_fail++;
         return;
+    }
 
-    /* CRC16校验 (先校验再解析, 避免使用错误数据) */
-    if (Verify_CRC16_Check_Sum(image_buf, IMAGE_FRAME_SIZE) == FALSE)
-        return;
-
-    /* ---- 遥控器摇杆通道数据解析 ---- */
+    /* ---- 遥控器摇杆通道数据解析 (先解析, 后CRC校验, 与参考实现一致) ---- */
     image_rc_ctrl[TEMP].rc.rocker_r_x = ((image_buf[2] | (image_buf[3] << 8)) & 0x07FF) - IMAGE_REMOTE_VALUE_OFFSET;
     image_rc_ctrl[TEMP].rc.rocker_r_y = (((image_buf[3] >> 3) | (image_buf[4] << 5)) & 0x07FF) - IMAGE_REMOTE_VALUE_OFFSET;
     image_rc_ctrl[TEMP].rc.rocker_l_y = (((image_buf[4] >> 6) | (image_buf[5] << 2) | (image_buf[6] << 10)) & 0x07FF) - IMAGE_REMOTE_VALUE_OFFSET;
@@ -53,6 +59,14 @@ static void ana_image_rc(const uint8_t *image_buf)
 
     /* ---- 键盘解析 (位域, 小端序) ---- */
     *(uint16_t *)&image_rc_ctrl[TEMP].key[KEY_PRESS] = image_buf[17] | (image_buf[18] << 8);
+
+    /* CRC16校验 */
+    if (Verify_CRC16_Check_Sum((uint8_t *)image_buf, IMAGE_FRAME_SIZE) == FALSE)
+    {
+        image_crc_fail++;
+        memset(&image_rc_ctrl[TEMP], 0, sizeof(Image_RC_ctrl_t));
+        return;
+    }
 
     /* ---- Ctrl/Shift 组合键处理 ---- */
     if (image_rc_ctrl[TEMP].key[KEY_PRESS].ctrl)
@@ -105,8 +119,11 @@ static void ana_image_rc(const uint8_t *image_buf)
  */
 static void ImageControlRxCallback()
 {
+    image_rx_cnt++;
     DaemonReload(image_daemon_instance);
+    memcpy(r_recv_buff, image_usart_instance->recv_buff, IMAGE_FRAME_SIZE);
     ana_image_rc(image_usart_instance->recv_buff);
+    enable_flag = 1;
 }
 
 /**
@@ -116,6 +133,7 @@ static void ImageLostCallback(void *id)
 {
     memset(&image_rc_ctrl, 0, sizeof(image_rc_ctrl));
     USARTServiceInit(image_usart_instance); // 尝试重新启动接收
+    enable_flag = 0;
     LOGWARNING("[image] image remote lost");
 }
 

@@ -21,7 +21,7 @@
 #include "controller.h"
 #include "vofa.h"
 #include "simple_kalman.h"
-#include "dji_motor_offline_alarm.h" // 电机离线检测
+#include "motor_offline_alarm.h" // 电机离线检测
 
 // 速度融合卡尔曼滤波器实例
 static SimpleKalman1D_t kf_vx, kf_vy;

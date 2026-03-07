@@ -16,9 +16,9 @@ void BuzzerInit(void);
 
 /**
  * @brief 打开蜂鸣器
- * @param freq 频率等级 (1=最高音, 值越大越低沉), 对应TIM prescaler, 范围1~1000
+ * @param freq_hz 频率(Hz), 值越大音越高, 范围100~5000
  */
-void BuzzerOn(uint16_t freq);
+void BuzzerOn(uint16_t freq_hz);
 
 /**
  * @brief 打开蜂鸣器 (直接设置prescaler和compare, 用于降调等特殊音效)

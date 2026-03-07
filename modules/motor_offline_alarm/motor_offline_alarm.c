@@ -1,12 +1,12 @@
 /**
- * @file dji_motor_offline_alarm.c
- * @brief 大疆电机离线蜂鸣器报警模块 (v3.0 - 状态机版)
+ * @file motor_offline_alarm.c
+ * @brief 通用电机离线蜂鸣器报警模块 (v4.0 - 多电机类型支持)
  * @note 状态机流程:
- *       SILENCE → IDLE ⇄ BEEP_ON → BEEP_OFF → (循环或TAIL) → IDLE
- *                      ↘ DESC → DESC_COOL → IDLE
+ *       IDLE ⇄ BEEP_ON → BEEP_OFF → (循环或TAIL) → IDLE
+ *            ↘ DESC → DESC_COOL → IDLE
  */
 
-#include "dji_motor_offline_alarm.h"
+#include "motor_offline_alarm.h"
 #include "bsp_buzzer.h"
 #include "bsp_dwt.h"
 #include <string.h>
@@ -54,7 +54,7 @@ static void _EnterState(_State_e st, float now)
 
 MotorOfflineAlarmInstance* MotorOfflineAlarmRegister(MotorOfflineAlarmConfig_t *config)
 {
-    if (!config || _pool_count >= MOTOR_GROUP_MAX_COUNT)
+    if (!config || !config->is_online || _pool_count >= MOTOR_GROUP_MAX_COUNT)
         return NULL;
 
     // 自动计数: 若motor_count为0,则遍历motors[]数非NULL指针
@@ -70,6 +70,7 @@ MotorOfflineAlarmInstance* MotorOfflineAlarmRegister(MotorOfflineAlarmConfig_t *
     MotorOfflineAlarmInstance *inst = &_pool[_pool_count++];
     memset(inst, 0, sizeof(*inst));
     inst->motor_count     = count;
+    inst->is_online       = config->is_online;
     inst->check_period_ms = config->check_period_ms ? config->check_period_ms : ALARM_DEFAULT_CHECK_PERIOD_MS;
     inst->beep_on_ms      = config->beep_on_ms  ? config->beep_on_ms  : ALARM_DEFAULT_BEEP_ON_MS;
     inst->beep_off_ms     = config->beep_off_ms  ? config->beep_off_ms  : ALARM_DEFAULT_BEEP_OFF_MS;
@@ -95,7 +96,7 @@ static void _UpdateOfflineCount(MotorOfflineAlarmInstance *inst)
 
     inst->offline_count = 0;
     for (uint8_t i = 0; i < inst->motor_count; i++) {
-        if (!DJIMotorIsOnline(inst->motors[i]))
+        if (!inst->is_online(inst->motors[i]))
             inst->offline_count++;
     }
 }
@@ -104,9 +105,10 @@ static uint8_t _AllMotorsOffline(void)
 {
     uint8_t total = 0, offline = 0;
     for (uint8_t g = 0; g < _pool_count; g++) {
-        for (uint8_t i = 0; i < _pool[g].motor_count; i++) {
+        MotorOfflineAlarmInstance *inst = &_pool[g];
+        for (uint8_t i = 0; i < inst->motor_count; i++) {
             total++;
-            if (!DJIMotorIsOnline(_pool[g].motors[i]))
+            if (!inst->is_online(inst->motors[i]))
                 offline++;
         }
     }
@@ -115,21 +117,17 @@ static uint8_t _AllMotorsOffline(void)
 
 /**
  * @brief 轮询选取下一个离线电机,并输出其组的时间参数
- * @note 从 _rr_index 开始扫描,找到后将 _rr_index 推进到下一个位置
  */
 static uint8_t _FindNextOffline(uint16_t *out_freq, uint8_t *out_times,
                                  uint16_t *out_on, uint16_t *out_off, uint16_t *out_tail)
 {
-    // 计算所有组的电机总数
     uint8_t total = 0;
     for (uint8_t g = 0; g < _pool_count; g++)
         total += _pool[g].motor_count;
     if (total == 0) return 0;
 
-    // 从 _rr_index 开始,扫描一圈
     for (uint8_t n = 0; n < total; n++) {
         uint8_t pos = (_rr_index + n) % total;
-        // 将扁平索引映射到 (group, motor)
         uint8_t g = 0, offset = pos;
         while (g < _pool_count && offset >= _pool[g].motor_count) {
             offset -= _pool[g].motor_count;
@@ -137,13 +135,13 @@ static uint8_t _FindNextOffline(uint16_t *out_freq, uint8_t *out_times,
         }
         if (g >= _pool_count) continue;
         MotorOfflineAlarmInstance *inst = &_pool[g];
-        if (!DJIMotorIsOnline(inst->motors[offset])) {
+        if (!inst->is_online(inst->motors[offset])) {
             *out_freq  = inst->buzzer_freq;
             *out_times = inst->beep_times[offset];
             *out_on    = inst->beep_on_ms;
             *out_off   = inst->beep_off_ms;
             *out_tail  = inst->beep_tail_ms;
-            _rr_index  = (pos + 1) % total;  // 下次从这个电机之后开始
+            _rr_index  = (pos + 1) % total;
             return 1;
         }
     }
@@ -160,13 +158,11 @@ static void _RunStateMachine(void)
     switch (_state) {
 
     case ST_IDLE: {
-        // 全部离线 → 降调
         if (_AllMotorsOffline()) {
             BuzzerOnRaw(DESC_START_VAL / 1000, 10000);
             _EnterState(ST_DESC, now);
             break;
         }
-        // 轮询找下一个离线电机
         uint16_t freq;
         uint8_t times;
         uint16_t on_ms, off_ms, tail_ms;

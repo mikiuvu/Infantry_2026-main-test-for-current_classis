@@ -174,9 +174,9 @@ float DJIMotorGetPowerLimitCoef(void);
 
 /**
  * @brief 检查电机是否在线
- * @param motor 电机实例指针
+ * @param motor 电机实例指针 
  * @return uint8_t 1=在线, 0=离线
  */
-uint8_t DJIMotorIsOnline(DJIMotorInstance *motor);
+uint8_t DJIMotorIsOnline(void *motor);
 
 #endif // !DJI_MOTOR_H

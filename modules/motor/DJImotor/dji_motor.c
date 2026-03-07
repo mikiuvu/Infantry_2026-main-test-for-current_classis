@@ -528,14 +528,15 @@ void DJIMotorControl()
 
 /**
  * @brief 检查电机是否在线
- * @param motor 电机实例指针
+ * @param motor 电机实例指针 (void*以兼容通用离线报警模块)
  * @return uint8_t 1=在线, 0=离线
  */
-uint8_t DJIMotorIsOnline(DJIMotorInstance *motor)
+uint8_t DJIMotorIsOnline(void *motor)
 {
-    if (motor == NULL || motor->motor_daemon == NULL)
+    DJIMotorInstance *m = (DJIMotorInstance *)motor;
+    if (m == NULL || m->motor_daemon == NULL)
         return 0;
-    return DaemonIsOnline(motor->motor_daemon);
+    return DaemonIsOnline(m->motor_daemon);
 }
 
 void ChassisPowerSet(float power)

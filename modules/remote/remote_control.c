@@ -14,6 +14,8 @@ static uint8_t rc_init_flag = 0; // 遥控器初始化标志位
 // 遥控器拥有的串口实例,因为遥控器是单例,所以这里只有一个,就不封装了
 static USARTInstance *rc_usart_instance;
 static DaemonInstance *rc_daemon_instance;
+
+extern uint8_t enable_flag; // 来自transfer_image.c, 图传使能时不清空rc_data
 /**
  * @brief 矫正遥控器摇杆的值,超过660或者小于-660的值都认为是无效值,置0
  *
@@ -117,10 +119,12 @@ static void RemoteControlRxCallback()
  */
 static void RCLostCallback(void *id)
 {
-    // @todo 遥控器丢失的处理
-    rc_ctrl[TEMP].rc.dial=1000;
+    // 图传使能时不清空rc_data, 防止转写后的数据被DJI离线回调覆盖
+    if (enable_flag == 0)
+    {
+        memset(rc_ctrl, 0, sizeof(rc_ctrl));
+    }
     USARTServiceInit(rc_usart_instance); // 尝试重新启动接收
-
 }
 
 RC_ctrl_t *RemoteControlInit(UART_HandleTypeDef *rc_usart_handle)

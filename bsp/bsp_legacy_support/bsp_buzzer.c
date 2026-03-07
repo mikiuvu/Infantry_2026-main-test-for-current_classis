@@ -15,11 +15,15 @@ void BuzzerInit(void)
     BuzzerOff();
 }
 
-void BuzzerOn(uint16_t freq)
+void BuzzerOn(uint16_t freq_hz)
 {
-    if (freq < 1)   freq = 1;
-    if (freq > 1000) freq = 1000;
-    __HAL_TIM_PRESCALER(&htim4, freq);
+    if (freq_hz < 100)  freq_hz = 100;
+    if (freq_hz > 5000) freq_hz = 5000;
+    // TIM4: 84MHz, ARR=65535, PWM频率 = 84MHz / (PSC+1) / 65536
+    // PSC = 84000000 / (freq_hz * 65536) - 1
+    uint32_t psc = 84000000 / ((uint32_t)freq_hz * 65536);
+    if (psc < 1) psc = 1;
+    __HAL_TIM_PRESCALER(&htim4, (uint16_t)psc);
     __HAL_TIM_SetCompare(&htim4, TIM_CHANNEL_3, 5000);
 }
 

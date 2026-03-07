@@ -129,6 +129,11 @@
 #define YAW_ACC_TO_CURRENT      0.05f    // yaw加速度(°/s²)转电流系数
 #define PITCH_ACC_TO_CURRENT    0.05f    // pitch加速度(°/s²)转电流系数
 
+/* ======================== Yaw小陀螺自稳前馈参数 ======================== */
+#define YAW_VISCOUS_FF_COEF     0.0f     // 粘滞阻尼前馈系数 (N·m·s/rad → 电流)
+#define YAW_COULOMB_FF_COEF     0.0f     // 库伦摩擦前馈系数 (电流值)
+#define YAW_COULOMB_DEADZONE    5.0f     // 库伦摩擦死区 (°/s), SmoothSign边界层
+
 /* ======================== Pitch重力补偿参数 ======================== */
 #define GRAVITY_COMP_MAX        -4200.0f  // 最大重力补偿电流值(水平时)
 #define PITCH_HORIZONTAL_ANGLE  -1.2f      // pitch水平时的IMU角度(°)

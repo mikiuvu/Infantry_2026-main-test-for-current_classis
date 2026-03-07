@@ -19,7 +19,7 @@
 #include "controller.h"
 #include "vofa.h"
 #include "simple_kalman.h"
-#include "dji_motor_offline_alarm.h"
+#include "motor_offline_alarm.h"
 
 /* ======================== 轮子索引 ======================== */
 #define W_LF 0
