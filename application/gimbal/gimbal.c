@@ -58,9 +58,9 @@ void GimbalInit()
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 0.55, //0.55
+                .Kp = 0.65, //0.55
                 .Ki = 0.04,//0.05
-                .Kd = 0.035,//0.02
+                .Kd = 0.045,//0.02
                 .CoefA =0.5,//0.5
                 .CoefB = 0.6,//0.6
                 .Output_LPF_RC = 0,
@@ -105,9 +105,9 @@ void GimbalInit()
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp =0.45,//0.45
+                .Kp =0.55,//0.45
                 .Ki = 0.4,//0.4
-                .Kd = 0.045,//0.045
+                .Kd = 0.07,//0.045
                 .CoefA = 0.7,//0.7
                 .CoefB = 0.6,//0.6
                 .DeadBand = 0,//0
@@ -143,7 +143,7 @@ void GimbalInit()
             .feedback_reverse_flag = FEEDBACK_DIRECTION_NORMAL,
             .feedforward_flag = SPEED_FEEDFORWARD | CURRENT_FEEDFORWARD, 
         },
-        .motor_type = GM6020,
+        .motor_type = GM6020_CURRENT,
     };
     // 电机对total_angle闭环,上电时为零,会保持静止,收到遥控器数据再动
     yaw_motor = DJIMotorInit(&yaw_config);

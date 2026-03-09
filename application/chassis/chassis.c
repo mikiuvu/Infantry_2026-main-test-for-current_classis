@@ -119,7 +119,7 @@ static uint8_t observer_inited = 0;
 static uint32_t zero_input_cnt = 0;    // 零输入计数器
 
 // 超电重启冷却时间 (500*2ms=1s)
-#define CAP_RESTART_COOLDOWN 40000
+#define CAP_RESTART_COOLDOWN 2000
 
 /* 根据robot_def.h中的macro自动计算的参数 */
 float L=200; //轮轴距中心距离
@@ -578,7 +578,7 @@ static void LimitChassisOutput()
         rotate_speed_buff = pos_variable_rotate_speed[GetRandomInt(0, 7)];
     }
     
-    rotate_speed_buff = 1.5;
+    // rotate_speed_buff = 1.5;
 
     // 混合控制模式: 设置目标速度，前馈已在GlobalObserverCalculate中更新
     // 电机模块会自动使用速度环+电流前馈
@@ -623,7 +623,7 @@ static void LimitChassisOutput()
     // 超级电容控制: 发送裁判系统功率限制和能量缓冲区  
     struct CapTxMsg cap_msg = {
         .enableDCDC = enableDCDC,
-        .systemRestart = restart, //restart,
+        .systemRestart = 0, //restart,
         .RefereePowerLimit = referee_power_limit,
         .RefereeEnergyBuffer = 60,
     };

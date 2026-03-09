@@ -17,10 +17,10 @@
 #include "stdint.h"
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
-#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
+//#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
 //#define CHASSIS_ONLY                  // 底盘调试模式: 无云台,只有底盘+超级电容+遥控器 
 //#define FORCE_CONTROL_CHASSIS_BOARD   // 力控底盘板
-//#define GIMBAL_BOARD                    // 云台板
+#define GIMBAL_BOARD                    // 云台板
 
 /* 遥控器类型选择: 定义USE_IMAGE_REMOTE使用图传遥控器(UART6), 注释掉则使用原DJI遥控器(USART3/DBUS) */
 //#define USE_IMAGE_REMOTE
@@ -56,9 +56,9 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD 5548  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
+#define YAW_CHASSIS_ALIGN_ECD 1382  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
 //#define YAW_CHASSIS_ALIGN_ECD 2030  //步兵二
-#define YAW_ECD_GREATER_THAN_4096 1 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
+#define YAW_ECD_GREATER_THAN_4096 0 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
 #define PITCH_MAX_ANGLE 0 //云台竖直方向最大角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度) 
 #define PITCH_MIN_ANGLE 0 //云台竖直方向最小角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度)
@@ -109,7 +109,7 @@
 #define CHASSIS_TRANSLATE_DASH_RATIO  1.20f     // 非自旋模式按住Shift时的平动加速倍率
 
 /* ======================== 底盘自旋参数 ======================== */
-#define CHASSIS_ROTATE_BASE_WZ       2000.0f  // 小陀螺基础自旋速度 (degree/s)
+#define CHASSIS_ROTATE_BASE_WZ       3000.0f  // 小陀螺基础自旋速度 (degree/s)
 #define CHASSIS_ROTATE_DASH_RATIO    2.0f    // 键鼠模式按住Shift时的小陀螺加速倍率
 
 /* ======================== IMU安装方向校正 ======================== */
@@ -164,7 +164,7 @@
 #define YAW_COULOMB_DEADZONE    5.0f     // SmoothSign边界层厚度 (°/s)
 
 /* ======================== Pitch重力补偿参数 ======================== */
-#define GRAVITY_COMP_MAX        7200.0f  // 最大重力补偿 (CAN原始值,水平时)
+#define GRAVITY_COMP_MAX        5200.0f  // 最大重力补偿 (CAN原始值,水平时)
 #define PITCH_HORIZONTAL_ANGLE  -1.2f      // pitch水平时的IMU角度(°)
 
 // 检查是否出现主控板定义冲突,只允许一个开发板定义存在,否则编译会自动报错

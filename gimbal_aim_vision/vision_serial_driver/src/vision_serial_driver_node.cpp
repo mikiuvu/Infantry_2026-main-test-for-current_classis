@@ -123,7 +123,7 @@ void serial_driver_node::auto_aim_callback(const vision_interfaces::msg::AutoAim
   {
     vArray->msg.head = 0xA5;  // 包头0x00A5，小端序存储为 [A5 00]，下位机检查首字节为0xA5
     vArray->msg.fire = vMsg.fire;
-    vArray->msg.aimPitch = -vMsg.aim_pitch;
+    vArray->msg.aimPitch = vMsg.aim_pitch;
     vArray->msg.aimYaw = -vMsg.aim_yaw;
     vArray->msg.tracking = vMsg.tracking;
     RCLCPP_INFO(get_logger(), "aimYaw: %f, aimPitch: %f, fire: %d, tracking: %d", vMsg.aim_yaw, vMsg.aim_pitch, vMsg.fire, vMsg.tracking);
