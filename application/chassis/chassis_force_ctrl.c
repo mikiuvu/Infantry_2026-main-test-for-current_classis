@@ -92,16 +92,7 @@ static float L = 200.0f;
 
 /* ======================== 辅助函数 ======================== */
 
-/**
- * @brief 平滑符号函数 (边界层法)
- */
-static float _SmoothSign(float s, float phi)
-{
-    if (phi < 0.001f) phi = 0.001f;
-    if (fabsf(s) < phi)
-        return s / phi;
-    return (s > 0.0f) ? 1.0f : -1.0f;
-}
+
 
 /**
  * @brief 浮点限幅
@@ -159,7 +150,7 @@ static float _CalcDragFF(float w)
  */
 static float _STSMCCalc(WheelST_SMC_t *st, float s, float dt)
 {
-    float sign_s = _SmoothSign(s, FC_ST_PHI);
+    float sign_s = SmoothSign(s, FC_ST_PHI);
     float abs_s  = fabsf(s);
 
     // 比例项

@@ -80,7 +80,7 @@ void GimbalInit()
                 .Output_LPF_RC = 0.002,//0.002
                 .Improve = PID_Trapezoid_Intergral |PID_Integral_Limit |PID_Derivative_On_Measurement |  PID_OutputFilter,
                 .IntegralLimit = 5000,
-                .MaxOut = 20000,//20000
+                .MaxOut = 16000,//16000
             },
             .other_angle_feedback_ptr = &gimba_IMU_data->YawTotalAngle,
             // 还需要增加角速度额外反馈指针,注意方向,ins_task.md中有c板的bodyframe坐标系说明
@@ -96,7 +96,7 @@ void GimbalInit()
             .motor_reverse_flag = MOTOR_DIRECTION_NORMAL,
             .feedforward_flag = SPEED_FEEDFORWARD | CURRENT_FEEDFORWARD,  // 启用速度+电流前馈
         },
-        .motor_type = GM6020};
+        .motor_type = GM6020_CURRENT};
         
     Motor_Init_Config_s pitch_config = {
         .can_init_config = {
@@ -106,8 +106,8 @@ void GimbalInit()
         .controller_param_init_config = {
             .angle_PID = {
                 .Kp =0.45,//0.45
-                .Ki = 0.4,//0.5
-                .Kd = 0.045,//0.005
+                .Ki = 0.4,//0.4
+                .Kd = 0.045,//0.045
                 .CoefA = 0.7,//0.7
                 .CoefB = 0.6,//0.6
                 .DeadBand = 0,//0
@@ -285,22 +285,22 @@ void GimbalTask()
     yaw_speed_feedforward = yaw_speed_filtered * feedforward_ramp_factor * YAW_SPEED_FF_COEF * DEGREE_2_RAD;
     pitch_speed_feedforward = pitch_speed_filtered * feedforward_ramp_factor * PITCH_SPEED_FF_COEF * DEGREE_2_RAD;
     
-    // 电流前馈 = 加速度前馈 * 系数
-    float yaw_acc_current = YAW_ACC_TO_CURRENT * yaw_acc_filtered * feedforward_ramp_factor;
-    float pitch_acc_current = PITCH_ACC_TO_CURRENT * pitch_acc_filtered * feedforward_ramp_factor;
-    // ======================== 小陀螺自稳前馈 (物理模型) ========================
-    // τ_ff = b * ω_rel + f_c * sign(ω_rel),  ω_rel ≈ ω_chassis (云台近似静止)
-    // 转换为电流: I_ff = K_viscous * ω + K_coulomb * sign(ω)
-    float chassis_wz_rad = chassis_real_speed.chassis_imu_data.Gyro[2];  // IMU直接给出 rad/s
-    float viscous_current = YAW_VISCOUS_FF_COEF * chassis_wz_rad;     // 粘滞阻尼项
-    // 库伦摩擦项: 平滑符号函数避免零速跳变 (SmoothSign输入用°/s与死区单位一致)
-    float chassis_wz_dps = chassis_wz_rad * RAD_2_DEGREE;
-    float smooth_sign_val = (fabsf(chassis_wz_dps) < YAW_COULOMB_DEADZONE) ?
-        (chassis_wz_dps / YAW_COULOMB_DEADZONE) :
-        ((chassis_wz_dps > 0) ? 1.0f : -1.0f);
-    float coulomb_current = YAW_COULOMB_FF_COEF * smooth_sign_val;
-    float chassis_wz_current = viscous_current + coulomb_current;
-    yaw_current_feedforward = yaw_acc_current + chassis_wz_current;
+    // 电流前馈: 加速度(°/s²) → 力矩(N·m) → CAN原始值
+    // τ_acc = J * α, α需要从°/s²转rad/s², 再通过NM_TO_GM6020_RAW转为CAN值
+    float yaw_acc_torque = YAW_INERTIA * yaw_acc_filtered * DEGREE_2_RAD;  // N·m
+    float yaw_acc_current = yaw_acc_torque * NM_TO_GM6020_RAW * feedforward_ramp_factor;
+    float pitch_acc_torque = PITCH_INERTIA * pitch_acc_filtered * DEGREE_2_RAD;  // N·m
+    float pitch_acc_current = pitch_acc_torque * NM_TO_GM6020_RAW * feedforward_ramp_factor;
+    // ======================== 小陀螺自稳前馈 (三参数模型) ========================
+    // τ = b*ω + τ_f*sign(ω)
+    // 所有参数均为物理量 (N·m), 最后统一乘NM_TO_GM6020_RAW转为CAN原始值
+    float chassis_wz_rad = chassis_real_speed.chassis_imu_data.Gyro[2];  // rad/s
+    float chassis_wz_dps = chassis_wz_rad * RAD_2_DEGREE;               // °/s (用于SmoothSign)
+    float smooth_sign_val = SmoothSign(chassis_wz_dps, YAW_COULOMB_DEADZONE);
+    float viscous_torque = YAW_VISCOUS_DAMPING * chassis_wz_rad;  // N·m
+    float friction_torque = YAW_FRICTION_TORQUE * smooth_sign_val;  // N·m
+    float yaw_total_torque = viscous_torque + friction_torque;  // N·m
+    yaw_current_feedforward = yaw_acc_current + yaw_total_torque * NM_TO_GM6020_RAW;
     
     // 使用IMU的Pitch角度计算重力补偿: feedforward = MAX * cos(pitch_angle)
     float pitch_angle_rad = (gimba_IMU_data->Pitch - PITCH_HORIZONTAL_ANGLE) * DEGREE_2_RAD;
@@ -312,8 +312,7 @@ void GimbalTask()
     gimbal_feedback_data.yaw_motor_single_round_angle = yaw_motor->measure.angle_single_round;
     
     // CH0:yaw角度  CH1:yaw角速度(rad/s)  CH2:底盘wz(°/s)  CH3:yaw电流前馈  CH4:实际电流
-    VOFA(0, gimba_IMU_data->YawTotalAngle, gimba_IMU_data->Gyro[2],
-         chassis_real_speed.real_wz, yaw_current_feedforward, (float)yaw_motor->measure.real_current);
+    VOFA(0, gimba_IMU_data->Yaw,gimba_IMU_data->Gyro[2],(float)yaw_motor->measure.real_current);
     // 推送消息
     PubPushMessage(gimbal_pub, (void *)&gimbal_feedback_data);
 }

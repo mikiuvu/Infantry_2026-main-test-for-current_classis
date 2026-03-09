@@ -18,11 +18,6 @@ static USARTInstance *image_usart_instance;
 
 uint8_t enable_flag = 0; // 图传遥控器使能标志, 收到数据置1, 离线置0
 
-uint8_t r_recv_buff[100]; // 调试用: 保存最近一帧原始数据
-volatile uint32_t image_rx_cnt = 0;     // 调试用: 回调触发次数
-volatile uint32_t image_sof_fail = 0;   // 调试用: SOF校验失败次数
-volatile uint32_t image_crc_fail = 0;   // 调试用: CRC校验失败次数
-
 /**
  * @brief 图传遥控器协议解析 (与参考实现一致: 先解析再CRC校验)
  * @param image_buf 原始串口接收缓冲区
@@ -31,7 +26,6 @@ static void ana_image_rc(const uint8_t *image_buf)
 {
     if (image_buf[0] != IMAGE_FIRST_SOF || image_buf[1] != IMAGE_SECOND_SOF)
     {
-        image_sof_fail++;
         return;
     }
 
@@ -63,7 +57,6 @@ static void ana_image_rc(const uint8_t *image_buf)
     /* CRC16校验 */
     if (Verify_CRC16_Check_Sum((uint8_t *)image_buf, IMAGE_FRAME_SIZE) == FALSE)
     {
-        image_crc_fail++;
         memset(&image_rc_ctrl[TEMP], 0, sizeof(Image_RC_ctrl_t));
         return;
     }
@@ -119,9 +112,7 @@ static void ana_image_rc(const uint8_t *image_buf)
  */
 static void ImageControlRxCallback()
 {
-    image_rx_cnt++;
     DaemonReload(image_daemon_instance);
-    memcpy(r_recv_buff, image_usart_instance->recv_buff, IMAGE_FRAME_SIZE);
     ana_image_rc(image_usart_instance->recv_buff);
     enable_flag = 1;
 }

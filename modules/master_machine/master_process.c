@@ -67,6 +67,11 @@ void VisionSetAltitude(float yaw, float pitch, float roll)
     // send_data.robotPitch = pitch;
 }
 
+const Vision_Send_s *VisionGetSendData(void)
+{
+    return &send_data;
+}
+
 /**
  * @brief 设置导航状态数据
  * @param nav_data 导航状态值(0-255)
@@ -218,9 +223,9 @@ static uint8_t *vis_recv_buff; // USB接收缓冲区指针
  */
 static void VisionOfflineCallback(void *id)
 {
-    // 离线时清空接收数据,避免使用过期数据
-    //memset(&recv_data, 0, sizeof(recv_data));
-    memset(&recv_data, 0, sizeof(Vision_Recv_s));
+    // 离线时仅清空状态位,保留最后一帧角度用于诊断,控制层仍会依据tracking=0退出视觉控制
+    recv_data.fire = 0;
+    recv_data.tracking = NO_TARGET;
     LOGWARNING("[Vision] Vision communication offline!");
 }
 

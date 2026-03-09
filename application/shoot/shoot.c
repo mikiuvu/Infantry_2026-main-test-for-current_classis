@@ -93,6 +93,18 @@ static float loader_current_forward = 0;
 static float hibernate_time = 0, dead_time = 0, blocked_num = 0, blocked_time = 0;
 static float load_angle_set = 0;
 
+static uint8_t LoaderBlockedDetected(void)
+{
+    if (loader == NULL)
+    {
+        return 0;
+    }
+
+    return loader->motor_controller.speed_PID.ERRORHandler.ERRORType == PID_MOTOR_BLOCKED_ERROR &&
+           fabsf(loader->measure.speed_aps) < BLOCK_SPEED_THRESHOLD &&
+           abs(loader->measure.real_current) > BLOCK_CURRENT_THRESHOLD;
+}
+
 // 发射电机离线检测实例
 static MotorOfflineAlarmInstance *shoot_offline_alarm = NULL;
 
@@ -187,8 +199,8 @@ void ShootInit()
                 .MaxOut = 20000,
             },
             .speed_PID = {
-                .Kp = 1.0, //0
-                .Ki = 0.1, //0
+                .Kp = 3.0, //0
+                .Ki = 2.0, //0
                 .Kd = 0.002,
                 .Improve = PID_Integral_Limit | PID_ErrorHandle,
                 .IntegralLimit = 400,//200
@@ -274,8 +286,8 @@ void ShootTask()
         // } 
         DJIMotorOuterLoop(friction_l, SPEED_LOOP);
         DJIMotorOuterLoop(friction_r, SPEED_LOOP);
-        DJIMotorSetRef(friction_l, 5000);//40000
-        DJIMotorSetRef(friction_r, 5000);
+        DJIMotorSetRef(friction_l, 30000);//40000
+        DJIMotorSetRef(friction_r, 30000);
     }
     else // 关闭摩擦轮
     {
@@ -292,7 +304,7 @@ void ShootTask()
 
     if (shoot_cmd_recv.bullet_speed >= shoot_cmd_recv.rest_heat + 10 || shoot_cmd_recv.bullet_speed == 0 || shoot_cmd_recv.rest_heat == 0)
     {
-        if (loader->motor_controller.speed_PID.ERRORHandler.ERRORType == PID_MOTOR_BLOCKED_ERROR)
+        if (LoaderBlockedDetected())
         {
             blocked_num++;
             if (blocked_num <= BLOCK_TIME_RECORD_COUNT)
@@ -355,7 +367,7 @@ void ShootTask()
             DJIMotorSetRef(loader, shoot_cmd_recv.shoot_rate * 360 * REDUCTION_RATIO_LOADER / NUM_PER_CIRCLE);
             // x颗/秒换算成速度: 已知一圈的载弹量,由此计算出1s需要转的角度,注意换算角速度(DJIMotor的速度单位是angle per second)
             break;
-        // 拨盘反转,对速度闭环
+        // 拨盘反转
         // 也有可能需要从switch-case中独立出来
         case LOAD_REVERSE:
             load_angle_set = loader->measure.total_angle - ONE_BULLET_DELTA_ANGLE * REDUCTION_RATIO_LOADER * REVERSE_ANGLE_RATIO;

@@ -7,6 +7,7 @@
 #include <string.h>
 #include "ins_task.h"
 #include "vofa.h"
+#include "bsp_dwt.h"
 // ======================== 视觉通信协议条件编译 ========================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     #include "master_process.h"  // VCP/UART协议 (ROS2上位机)
@@ -48,7 +49,7 @@ static float yaw_diff;
 // ======================== 视觉数据指针 - 根据协议类型条件编译 ========================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     static Vision_Recv_s *vision_recv_data; // VCP/UART协议视觉接收数据
-    static Vision_Send_s vision_send_data;  // VCP/UART协议视觉发送数据
+    static Vision_Recv_s vision_recv_cache; // 任务内使用的视觉快照,避免和中断回调并发读写
 #elif defined(VISION_USE_SERIALPORT)
     static SerialPort_Recv_s *vision_recv_data_sp; // SerialPort协议接收数据
     static SerialPort_Send_s vision_send_data_sp;  // SerialPort协议发送数据
@@ -70,9 +71,27 @@ static Robot_Status_e robot_state; // 机器人整体工作状态
 
 static float chassis_speed_buff;
 static Work_Mode_e vision_work_mode;
+static uint8_t yaw_ident_active;
+static float yaw_ident_center_yaw;
+static float yaw_ident_hold_pitch;
+static float yaw_ident_start_ms;
+static uint32_t yaw_ident_round_trip_count;
 
 uint8_t remote_flag = 0;  // 遥控器类型选择: 0=未选择, 1=DJI遥控(键鼠), 2=图传遥控
 uint8_t stop_flag = 0;    // 停止标志: 0=运行, 1=停止 (图传userkey左右同时按下切换)
+
+#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
+static void RefreshVisionRecvCache(void)
+{
+    uint32_t irq_state = __get_PRIMASK();
+
+    __disable_irq();
+    vision_recv_cache = *vision_recv_data;
+    __set_PRIMASK(irq_state);
+
+    vision_recv_cache.aimYaw = loop_float_constrain(vision_recv_cache.aimYaw, -180.0f, 180.0f);
+}
+#endif
 
 /**
  * @brief 二段灵敏度计算函数
@@ -109,6 +128,113 @@ static void VisionRockerAdjust(void)
     // 二段灵敏度参数: 阈值300, 低灵敏度/高灵敏度系数
     gimbal_cmd_send.yaw -= TwoStageSensitivity(rocker_l_filtered, 0.0003f, 0.0012f, 300);
     gimbal_cmd_send.pitch -= TwoStageSensitivity(rocker_l1_filtered, 0.00025f, 0.001f, 300);
+}
+
+static void ResetYawIdentificationMode(void)
+{
+    yaw_ident_active = 0;
+}
+
+static float Clamp01(float value)
+{
+    if (value < 0.0f)
+        return 0.0f;
+    if (value > 1.0f)
+        return 1.0f;
+    return value;
+}
+
+static float CalcYawIdentTravel01(float progress)
+{
+    float high_speed_ratio = YAW_IDENT_HIGH_SPEED_RATIO;
+    float ramp_ratio;
+    float max_speed;
+    float ramp_progress;
+
+    progress = Clamp01(progress);
+
+    if (high_speed_ratio < 0.0f)
+        high_speed_ratio = 0.0f;
+    if (high_speed_ratio > 0.8f)
+        high_speed_ratio = 0.8f;
+
+    ramp_ratio = 0.5f * (1.0f - high_speed_ratio);
+    if (ramp_ratio < 0.05f)
+        ramp_ratio = 0.05f;
+
+    max_speed = 1.0f / (1.0f - ramp_ratio);
+
+    if (progress < ramp_ratio)
+    {
+        return 0.5f * max_speed * progress * progress / ramp_ratio;
+    }
+
+    if (progress < 1.0f - ramp_ratio)
+    {
+        return 0.5f * max_speed * ramp_ratio + max_speed * (progress - ramp_ratio);
+    }
+
+    ramp_progress = progress - (1.0f - ramp_ratio);
+    return 1.0f - 0.5f * max_speed * (ramp_ratio - ramp_progress) * (ramp_ratio - ramp_progress) / ramp_ratio;
+}
+
+static float CalcYawIdentWavePosition(float phase)
+{
+    uint32_t quarter_index = (uint32_t)(phase * 4.0f);
+    float quarter_progress = phase * 4.0f - (float)quarter_index;
+    float travel = CalcYawIdentTravel01(quarter_progress);
+
+    switch (quarter_index & 0x3u)
+    {
+    case 0:
+        return travel;
+    case 1:
+        return 1.0f - travel;
+    case 2:
+        return -travel;
+    default:
+        return travel - 1.0f;
+    }
+}
+
+static void ApplyYawIdentificationMode(void)
+{
+    if (!yaw_ident_active)
+    {
+        yaw_ident_active = 1;
+        yaw_ident_center_yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
+        yaw_ident_hold_pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
+        yaw_ident_start_ms = DWT_GetTimeline_ms();
+        yaw_ident_round_trip_count = 0;
+    }
+
+    float elapsed_ms = DWT_GetTimeline_ms() - yaw_ident_start_ms;
+    uint32_t round_trip_count = (uint32_t)(elapsed_ms / YAW_IDENT_PERIOD_MS);
+    float cycle_elapsed_ms = elapsed_ms - round_trip_count * YAW_IDENT_PERIOD_MS;
+    float cycle_phase = cycle_elapsed_ms / YAW_IDENT_PERIOD_MS;
+    float amplitude = YAW_IDENT_START_AMPLITUDE_DEG + round_trip_count * YAW_IDENT_AMPLITUDE_STEP_DEG;
+    float wave_position;
+
+    yaw_ident_round_trip_count = round_trip_count;
+    if (amplitude > YAW_IDENT_MAX_AMPLITUDE_DEG)
+        amplitude = YAW_IDENT_MAX_AMPLITUDE_DEG;
+
+    wave_position = CalcYawIdentWavePosition(cycle_phase);
+
+    chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+    chassis_cmd_send.vx = 0.0f;
+    chassis_cmd_send.vy = 0.0f;
+    chassis_cmd_send.wz = 0.0f;
+    chassis_cmd_send.dash_mode = DASH_OFF;
+    chassis_cmd_send.aim_mode = AIM_OFF;
+
+    gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+    gimbal_cmd_send.yaw = yaw_ident_center_yaw + amplitude * wave_position;
+    gimbal_cmd_send.pitch = yaw_ident_hold_pitch;
+
+    shoot_cmd_send.shoot_mode = SHOOT_OFF;
+    shoot_cmd_send.friction_mode = FRICTION_OFF;
+    shoot_cmd_send.load_mode = LOAD_STOP;
 }
 
 #ifdef OUTBREAK_PRIORITY
@@ -156,7 +282,7 @@ static void Limitshoot()
     //     shoot_cmd_send.shoot_rate = 5;
     //     break;
     // }
-    shoot_cmd_send.shoot_rate = 20;
+    shoot_cmd_send.shoot_rate = 15;
 }
 #endif // DEBUG
 
@@ -281,16 +407,24 @@ static void RemoteControlSet()
     // 控制底盘和云台运行模式,云台待添加,云台是否始终使用IMU数据?
     if (switch_is_down(rc_data[TEMP].rc.switch_right)) // 右侧开关状态[下],进入小陀螺模式
     {
+#if YAW_IDENT_MODE_ENABLE
+        ApplyYawIdentificationMode();
+        return;
+#else
+        ResetYawIdentificationMode();
         chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+#endif
     }
     else if (switch_is_mid(rc_data[TEMP].rc.switch_right)) // 右侧开关状态[中],底盘和云台分离,底盘保持不转动
     {
+        ResetYawIdentificationMode();
         chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; //全改成云台gyro反馈
     }
     else if (switch_is_up(rc_data[TEMP].rc.switch_right))  // 右侧开关状态[上],进入跟头模式
     {
+        ResetYawIdentificationMode();
         chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; //全改成云台gyro反馈
     }
@@ -301,7 +435,7 @@ static void RemoteControlSet()
 
     uint8_t no_target = 0;
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-    no_target = (vision_recv_data->tracking == NO_TARGET);
+    no_target = (vision_recv_cache.tracking == NO_TARGET);
 #elif defined(VISION_USE_SERIALPORT)
     // SerialPort协议没有tracking字段,根据shootStatus或state判断
     no_target = (vision_recv_data_sp->shootStatus == 0);
@@ -314,12 +448,10 @@ static void RemoteControlSet()
         // ======================== 根据协议类型获取视觉数据 ========================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
         // VCP/UART协议
-        if (vision_recv_data->aimYaw > 180.0f)
-            vision_recv_data->aimYaw -= 360.0f; 
-        yaw_diff =(vision_recv_data->aimYaw == 0 ? 0 : vision_recv_data->aimYaw - gimbal_cmd_send.yaw);
+    yaw_diff = vision_recv_cache.aimYaw - gimbal_cmd_send.yaw;
         yaw_diff = loop_float_constrain(yaw_diff, -45.0f, 45.0f); 
         gimbal_cmd_send.yaw += yaw_diff;
-        gimbal_cmd_send.pitch = vision_recv_data->aimPitch;
+    gimbal_cmd_send.pitch = vision_recv_cache.aimPitch;
         // 视觉模式下遥控器微调 (二段灵敏度, 方便快速更换目标)  
         //VisionRockerAdjust();
 #elif defined(VISION_USE_SERIALPORT)
@@ -327,7 +459,7 @@ static void RemoteControlSet()
         // 上位机发送的是放大后的整数值,需要根据实际编码规则转换
         // 假设: yaw和pitch都是角度*100的整数形式
         if (vision_recv_data_sp->yaw != 0 || vision_recv_data_sp->pitch != 0) {
-            gimbal_cmd_send.yaw = (float)vision_recv_data_sp->yaw / 100.0f;
+            gimbal_cmd_send.yaw = loop_float_constrain((float)vision_recv_data_sp->yaw / 100.0f, -180.0f, 180.0f);
             gimbal_cmd_send.pitch = (float)vision_recv_data_sp->pitch / 100.0f;
         }
         
@@ -338,7 +470,7 @@ static void RemoteControlSet()
 #elif defined(VISION_USE_SP)
         // SP协议, 视觉返回目标角 (前馈现在在gimbal中本地计算)
         if (vision_recv_sp->mode != 0) {
-            gimbal_cmd_send.yaw = vision_recv_sp->yaw;
+            gimbal_cmd_send.yaw = loop_float_constrain(vision_recv_sp->yaw, -180.0f, 180.0f);
             gimbal_cmd_send.pitch = vision_recv_sp->pitch;
             
             // 二段灵敏度微调
@@ -428,7 +560,7 @@ static void RemoteControlSet()
         // 只有跟踪和开火标志位都为1时才开启摩擦轮，并允许通过拨轮控制拨弹盘
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
         // VCP/UART协议: 视觉fire=1且未手动拨弹时自动开火
-        if (vision_recv_data->fire == 1 && shoot_cmd_send.load_mode == LOAD_STOP)
+    if (vision_recv_cache.fire == 1 && shoot_cmd_send.load_mode == LOAD_STOP)
             shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
 #elif defined(VISION_USE_SERIALPORT)
         // SerialPort协议: 使用shootStatus字段 (非0=跟踪且开火, 0=停火)
@@ -531,50 +663,71 @@ static void image_rc_data_To_rc_data_t(void)
  */
 static void ImageMouseKeySet()
 {
+    static uint8_t last_x_key_count;
+    static uint8_t x_key_count_initialized;
+
     Limitshoot();
-    chassis_speed_buff = 30000;
+    chassis_speed_buff = CHASSIS_TRANSLATE_BASE_SPEED;
     chassis_cmd_send.chassis_power_buff = 1;
     gimbal_cmd_send.gimbal_mode = GIMBAL_FREE_MODE;
-    chassis_cmd_send.vy = image_rc_data[TEMP].key[KEY_PRESS].w * chassis_speed_buff - image_rc_data[TEMP].key[KEY_PRESS].s * chassis_speed_buff;
-    chassis_cmd_send.vx = image_rc_data[TEMP].key[KEY_PRESS].a * chassis_speed_buff - image_rc_data[TEMP].key[KEY_PRESS].d * chassis_speed_buff;
 
     // X键刷新UI
-    switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_X] % 2)
+    uint8_t current_x_key_count = image_rc_data[TEMP].key_count[KEY_PRESS][Key_X];
+    if (!x_key_count_initialized)
     {
-    case 1:  chassis_cmd_send.ui_mode = UI_REFRESH; break;
-    default: chassis_cmd_send.ui_mode = UI_KEEP;    break;
+        last_x_key_count = current_x_key_count;
+        x_key_count_initialized = 1;
     }
 
-    // 鼠标右键开启自瞄
-    switch (image_rc_data[TEMP].mouse.press_r)
+    if (current_x_key_count != last_x_key_count)
     {
-    case 0: // 无自瞄, 鼠标控制云台
-        gimbal_cmd_send.yaw -= (float)image_rc_data[TEMP].mouse.x / 660 * 16;
-        gimbal_cmd_send.pitch += (float)image_rc_data[TEMP].mouse.y / 660 * 16;
-        if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
-            gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
-        else if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
-            gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
-        chassis_cmd_send.aim_mode = AIM_OFF;
-        break;
-    default: // 视觉自瞄
+        chassis_cmd_send.ui_mode = UI_REFRESH;
+        last_x_key_count = current_x_key_count;
+    }
+    else
+    {
+        chassis_cmd_send.ui_mode = UI_KEEP;
+    }
+
+    // 鼠标右键 + 视觉tracking=1 → 自瞄; 否则鼠标控制
+    {
+        uint8_t vision_tracking = 0;
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        gimbal_cmd_send.yaw += loop_float_constrain(vision_recv_data->aimYaw - gimbal_cmd_send.yaw, -45, 45);
-        gimbal_cmd_send.pitch = (vision_recv_data->aimPitch == 0 ? gimbal_cmd_send.pitch : vision_recv_data->aimPitch);
+    vision_tracking = (vision_recv_cache.tracking != 0);
 #elif defined(VISION_USE_SERIALPORT)
-        if (vision_recv_data_sp->yaw != 0 || vision_recv_data_sp->pitch != 0) {
-            float aim_yaw = (float)vision_recv_data_sp->yaw / 100.0f;
-            float aim_pitch = (float)vision_recv_data_sp->pitch / 100.0f;
-            gimbal_cmd_send.yaw += loop_float_constrain(aim_yaw - gimbal_cmd_send.yaw, -45, 45);
-            gimbal_cmd_send.pitch = aim_pitch;
-        }
+        vision_tracking = (vision_recv_data_sp->shootStatus != 0);
 #endif
-        if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
-            gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
-        else if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
-            gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
-        chassis_cmd_send.aim_mode = AIM_ON;
-        break;
+        if (image_rc_data[TEMP].mouse.press_r && vision_tracking)
+        {
+            // 视觉自瞄
+#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
+            gimbal_cmd_send.yaw += loop_float_constrain(vision_recv_cache.aimYaw - gimbal_cmd_send.yaw, -45, 45);
+            gimbal_cmd_send.pitch = (vision_recv_cache.aimPitch == 0 ? gimbal_cmd_send.pitch : vision_recv_cache.aimPitch);
+#elif defined(VISION_USE_SERIALPORT)
+            if (vision_recv_data_sp->yaw != 0 || vision_recv_data_sp->pitch != 0) {
+                float aim_yaw = (float)vision_recv_data_sp->yaw / 100.0f;
+                float aim_pitch = (float)vision_recv_data_sp->pitch / 100.0f;
+                gimbal_cmd_send.yaw += loop_float_constrain(aim_yaw - gimbal_cmd_send.yaw, -45, 45);
+                gimbal_cmd_send.pitch = aim_pitch;
+            }
+#endif
+            if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
+                gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
+            else if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
+                gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
+            chassis_cmd_send.aim_mode = AIM_ON;
+        }
+        else
+        {
+            // 鼠标控制云台
+            gimbal_cmd_send.yaw -= (float)image_rc_data[TEMP].mouse.x / 660 * 16;
+            gimbal_cmd_send.pitch += (float)image_rc_data[TEMP].mouse.y / 660 * 16;
+            if (gimbal_cmd_send.pitch <= PITCH_MIN_LIMIT)
+                gimbal_cmd_send.pitch = PITCH_MIN_LIMIT;
+            else if (gimbal_cmd_send.pitch >= PITCH_MAX_LIMIT)
+                gimbal_cmd_send.pitch = PITCH_MAX_LIMIT;
+            chassis_cmd_send.aim_mode = AIM_OFF;
+        }
     }
 
     // E键发射模式
@@ -594,7 +747,7 @@ static void ImageMouseKeySet()
     if (image_rc_data[TEMP].mouse.press_r)
     {
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        if (vision_recv_data->fire == 1)
+        if (vision_recv_cache.fire == 1)
             shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
         else if (!image_rc_data[TEMP].mouse.press_l)
             shoot_cmd_send.load_mode = LOAD_STOP;
@@ -630,6 +783,15 @@ static void ImageMouseKeySet()
         chassis_cmd_send.super_cap = CAP_OFF;
         break;
     }
+
+    if (chassis_cmd_send.dash_mode == DASH_ON && chassis_cmd_send.chassis_mode != CHASSIS_ROTATE)
+    {
+        chassis_speed_buff *= CHASSIS_TRANSLATE_DASH_RATIO;
+    }
+
+    chassis_cmd_send.vy = image_rc_data[TEMP].key[KEY_PRESS].w * chassis_speed_buff - image_rc_data[TEMP].key[KEY_PRESS].s * chassis_speed_buff;
+    chassis_cmd_send.vx = image_rc_data[TEMP].key[KEY_PRESS].a * chassis_speed_buff - image_rc_data[TEMP].key[KEY_PRESS].d * chassis_speed_buff;
+
     // G键视觉目标
     switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_G] % 3)
     {
@@ -670,6 +832,9 @@ void RobotCMDTask()
     SubGetMessage(shoot_feed_sub, &shoot_fetch_data);
     SubGetMessage(gimbal_feed_sub, &gimbal_fetch_data);
     CalcOffsetAngle();
+#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
+    RefreshVisionRecvCache();
+#endif
 
     // ======== 控制源选择: 图传优先, 两者都离线则失能 ========
     if (ImageRemoteIsOnline())
@@ -721,20 +886,23 @@ void RobotCMDTask()
 
     shoot_cmd_send.bullet_speed = chassis_fetch_data.bullet_speed;
     
-    // ======================== 视觉发送数据准备 - 根据协议类型 ========================
+    // ======================== 视觉发送数据准备 - 根据协议类型 ====== ==================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     // VCP/UART协议 - 设置标志位和姿态角度
+    const Vision_Send_s *vision_send_data = VisionGetSendData();
     VisionSetFlag(chassis_fetch_data.self_color, vision_work_mode, chassis_fetch_data.bullet_speed);
-    VisionSetAltitude(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, 
+    VisionSetAltitude(loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f), 
                       gimbal_fetch_data.gimbal_imu_data.Pitch, 
                       gimbal_fetch_data.gimbal_imu_data.Roll);
+        //VOFA(0, vision_recv_cache.aimYaw, vision_recv_cache.aimPitch,
+        //vision_send_data->robotYaw, vision_send_data->robotPitch, vision_recv_cache.tracking);
 #elif defined(VISION_USE_SERIALPORT)
     // SerialPort协议 - 准备发送数据
     vision_send_data_sp.startflag = '!';
     vision_send_data_sp.flag = 0x01;  // 状态标志
     
     // 转换角度为整数(放大100倍)
-    vision_send_data_sp.yaw = (int32_t)(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle * 100.0f);
+    vision_send_data_sp.yaw = (int32_t)(loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f) * 100.0f);
     vision_send_data_sp.pitch = (int16_t)(gimbal_fetch_data.gimbal_imu_data.Pitch * 100.0f);
     vision_send_data_sp.roll = (int16_t)(gimbal_fetch_data.gimbal_imu_data.Roll * 100.0f);
     
@@ -749,6 +917,8 @@ void RobotCMDTask()
     
     // 用户时间偏差/弹速
     vision_send_data_sp.user_time_bias = (int8_t)chassis_fetch_data.bullet_speed;
+    VOFA(0, loop_float_constrain((float)vision_recv_data_sp->yaw / 100.0f, -180.0f, 180.0f), (float)vision_recv_data_sp->pitch / 100.0f,
+         (float)vision_send_data_sp.yaw / 100.0f, (float)vision_send_data_sp.pitch / 100.0f);
 #elif defined(VISION_USE_SP)
     // SP协议发送数据
     {
@@ -779,9 +949,12 @@ void RobotCMDTask()
         static uint16_t bullet_count = 0;
         
         VisionSPSetState(sp_mode, q, 
-                         gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, yaw_vel,
+                         loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f), yaw_vel,
                          gimbal_fetch_data.gimbal_imu_data.Pitch, pitch_vel,
                          (float)chassis_fetch_data.bullet_speed, bullet_count);
+           VOFA(0, loop_float_constrain(vision_recv_sp->yaw, -180.0f, 180.0f), vision_recv_sp->pitch,
+               loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f),
+               gimbal_fetch_data.gimbal_imu_data.Pitch);
     }0, 
 #endif
     
@@ -810,6 +983,7 @@ void RobotCMDTask()
     if (++sp_send_counter % 2 == 0)  // 100Hz
         VisionSPSend();
 #endif
-
+    
 #endif // CHASSIS_ONLY
+   
 }

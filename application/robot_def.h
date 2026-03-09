@@ -17,10 +17,10 @@
 #include "stdint.h"
 
 /* 开发板类型定义,烧录时注意不要弄错对应功能;修改定义后需要重新编译,只能存在一个定义! */
-//#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
+#define CHASSIS_BOARD                 // 底盘板 (速控底盘)
 //#define CHASSIS_ONLY                  // 底盘调试模式: 无云台,只有底盘+超级电容+遥控器 
 //#define FORCE_CONTROL_CHASSIS_BOARD   // 力控底盘板
-#define GIMBAL_BOARD                    // 云台板
+//#define GIMBAL_BOARD                    // 云台板
 
 /* 遥控器类型选择: 定义USE_IMAGE_REMOTE使用图传遥控器(UART6), 注释掉则使用原DJI遥控器(USART3/DBUS) */
 //#define USE_IMAGE_REMOTE
@@ -56,7 +56,7 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD 5516  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
+#define YAW_CHASSIS_ALIGN_ECD 5548  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
 //#define YAW_CHASSIS_ALIGN_ECD 2030  //步兵二
 #define YAW_ECD_GREATER_THAN_4096 1 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
@@ -67,11 +67,21 @@
 #define PITCH_MIN_LIMIT         -20.0f  // pitch最小角度(°)
 #define PITCH_MAX_LIMIT         30.0f   // pitch最大角度(°)
 
+/* ======================== Yaw参数辨识模式 ======================== */
+#define YAW_IDENT_MODE_ENABLE           0       // 1: 右开关下档进入yaw参数辨识模式 0: 保持原小陀螺模式
+#define YAW_IDENT_PERIOD_MS             2500.0f // 单次完整往返周期(ms)
+#define YAW_IDENT_START_AMPLITUDE_DEG   45.0f   // 初始往返幅值(°)
+#define YAW_IDENT_AMPLITUDE_STEP_DEG    25.0f   // 每次完整往返后幅值增量(°)
+#define YAW_IDENT_MAX_AMPLITUDE_DEG     180.0f  // 最大往返幅值(°)
+#define YAW_IDENT_HIGH_SPEED_RATIO      0.60f   // 单个四分之一行程中保持高速段的时间比例(0~0.8)
+
 // 拨盘堵转检测与反转参数
-#define BLOCK_DETECT_THRESHOLD 0.80f   // 堵转判定误差阈值(误差/目标值)
-#define BLOCK_DETECT_COUNT 200         // 堵转判定次数
+#define BLOCK_DETECT_THRESHOLD 0.90f   // 堵转判定误差阈值(误差/目标值)
+#define BLOCK_DETECT_COUNT 300         // 堵转判定次数
+#define BLOCK_SPEED_THRESHOLD  800.0f  // 拨盘堵转辅助判定: 低转速阈值 (degree/s, 电机转子)
+#define BLOCK_CURRENT_THRESHOLD 8000   // 拨盘堵转辅助判定: 高反馈电流阈值 (DJI原始反馈值)
 #define BLOCK_TIME_RECORD_COUNT 20     // 记录堵转时间戳的计数阈值，不建议修改 20
-#define REVERSE_DURATION_MS 500        // 反转持续时间(ms)
+#define REVERSE_DURATION_MS 250        // 反转持续时间(ms)
 #define REVERSE_ANGLE_RATIO 1.0f       // 反转角度系数，不建议修改 1.0
 
 // 发射参数
@@ -93,7 +103,15 @@
 #define CHASSIS_IMU_OFFSET_X     -185.0f   // IMU相对底盘中心的X偏移 (mm), 正值表示IMU在前
 #define CHASSIS_IMU_OFFSET_Y     4.1f   // IMU相对底盘中心的Y偏移 (mm), 正值表示IMU在左
 
-#define CHASSIS_POWER_LIMIT 50 // 
+#define CHASSIS_POWER_LIMIT 100 // 
+/* ======================== 底盘平动参数 ======================== */
+#define CHASSIS_TRANSLATE_BASE_SPEED  40000.0f  // 键鼠模式基础平动速度 (degree/s)
+#define CHASSIS_TRANSLATE_DASH_RATIO  1.20f     // 非自旋模式按住Shift时的平动加速倍率
+
+/* ======================== 底盘自旋参数 ======================== */
+#define CHASSIS_ROTATE_BASE_WZ       2000.0f  // 小陀螺基础自旋速度 (degree/s)
+#define CHASSIS_ROTATE_DASH_RATIO    2.0f    // 键鼠模式按住Shift时的小陀螺加速倍率
+
 /* ======================== IMU安装方向校正 ======================== */
 // 使用ins_task中的IMU_Param_Correction进行方向校正
 // Yaw/Pitch/Roll: IMU安装相对于机体系的偏角 (度)
@@ -120,22 +138,33 @@
 #endif
 
 
-/* ======================== 云台前馈参数 ======================== */
-// 前馈在gimbal中本地计算
-// 速度前馈系数 (目标角速度 * 系数 = 速度前馈输出)
-#define YAW_SPEED_FF_COEF       1.0f     // yaw速度前馈系数
-#define PITCH_SPEED_FF_COEF     1.0f     // pitch速度前馈系数 
-// 加速度-电流转换系数
-#define YAW_ACC_TO_CURRENT      0.05f    // yaw加速度(°/s²)转电流系数
-#define PITCH_ACC_TO_CURRENT    0.05f    // pitch加速度(°/s²)转电流系数
+/* ======================== GM6020电流模式物理常数 ======================== */
+// GM6020电流模式: 反馈real_current [-16384, +16384] 对应 [-3A, +3A]
+//                 发送CAN指令也是同比例的电流值 (int16)
+#define GM6020_KT               0.741f   // 转矩常数 (N·m/A)
+#define GM6020_I_MAX             3.0f     // 最大电流 (A)
+#define GM6020_RAW_MAX           16384.0f // CAN原始值满量程
+// N·m → CAN原始值的统一转换系数: raw = τ / Kt * (16384 / 3)
+#define NM_TO_GM6020_RAW        (GM6020_RAW_MAX / (GM6020_I_MAX * GM6020_KT))  // ≈7371.1
 
-/* ======================== Yaw小陀螺自稳前馈参数 ======================== */
-#define YAW_VISCOUS_FF_COEF     0.0f     // 粘滞阻尼前馈系数 (N·m·s/rad → 电流)
-#define YAW_COULOMB_FF_COEF     0.0f     // 库伦摩擦前馈系数 (电流值)
-#define YAW_COULOMB_DEADZONE    5.0f     // 库伦摩擦死区 (°/s), SmoothSign边界层
+/* ======================== 云台前馈参数 ======================== */
+// 前馈在gimbal中本地计算,所有前馈量在gimbal.c中通过NM_TO_GM6020_RAW统一转换为CAN原始值
+// 速度前馈系数 (目标角速度 * 系数 = 速度前馈输出)
+#define YAW_SPEED_FF_COEF       0.9f     // yaw速度前馈系数
+#define PITCH_SPEED_FF_COEF     0.9f     // pitch速度前馈系数 
+// 加速度前馈: 转动惯量J (直接填辨识值, 单位kg·m²)
+#define YAW_INERTIA             0.0f     // yaw转动惯量J (kg·m²), 辨识值直接填入 0.047723f
+#define PITCH_INERTIA           0.0f     // pitch转动惯量J (kg·m²), 辨识值直接填入
+
+/* ======================== Yaw小陀螺自稳前馈参数 (三参数模型) ======================== */
+// τ = b*ω + τ_f*sign(ω)
+// detect.py 输出的三个物理量直接填写在这里, gimbal.c 中统一转换为 GM6020 CAN 原始值
+#define YAW_VISCOUS_DAMPING     0.0f     // b: 粘滞阻尼系数 (N·m·s/rad) 0.003303f
+#define YAW_FRICTION_TORQUE     0.0f     // τ_f: 摩擦力矩 (N·m) 0.146554f
+#define YAW_COULOMB_DEADZONE    5.0f     // SmoothSign边界层厚度 (°/s)
 
 /* ======================== Pitch重力补偿参数 ======================== */
-#define GRAVITY_COMP_MAX        -4200.0f  // 最大重力补偿电流值(水平时)
+#define GRAVITY_COMP_MAX        7200.0f  // 最大重力补偿 (CAN原始值,水平时)
 #define PITCH_HORIZONTAL_ANGLE  -1.2f      // pitch水平时的IMU角度(°)
 
 // 检查是否出现主控板定义冲突,只允许一个开发板定义存在,否则编译会自动报错

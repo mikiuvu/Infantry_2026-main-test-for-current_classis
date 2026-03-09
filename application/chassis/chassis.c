@@ -177,7 +177,7 @@ void ChassisInit()
         .controller_param_init_config = {
             // 速度环 (主控制)
             .speed_PID = {
-                .Kp = 3.0f,
+                .Kp = 4.0f,
                 .Ki = 0.0f,
                 .Kd = 0.0f,
                 .IntegralLimit = 3000,
@@ -341,22 +341,6 @@ static void MecanumCalculate()
     vt_rf = (chassis_vx - chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER1;
     vt_lb = (-chassis_vx + chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER3;
     vt_rb = (chassis_vx + chassis_vy) / Sqrt(2) + chassis_cmd_recv.wz * CENTER4;
-}
-
-/**
- * @brief 平滑符号函数 (边界层法)
- * @param s 输入值
- * @param phi 边界层厚度
- * @return 平滑后的符号值 [-1, 1]
- */
-static float SmoothSign(float s, float phi)
-{
-    if (phi < 0.001f) phi = 0.001f;
-    if (fabsf(s) < phi) {
-        return s / phi;
-    } else {
-        return (s > 0) ? 1.0f : -1.0f;
-    }
 }
 
 /**
@@ -571,18 +555,23 @@ struct CapTxMsg
 static float chassis_powerlimit = 0;
 static void LimitChassisOutput()
 {   
-    static float chassis_power_buff = 1;
+    uint16_t referee_power_limit = CHASSIS_POWER_LIMIT;
 
-    // 超级电容控制: 当电容能量低于65%时关闭DC-DC，避免过放
-    uint8_t enableDCDC = (cap->cap_msg.capEnergy >= 65) ? 1 : 0;
+    if (referee_data != NULL && referee_data->GameRobotState.chassis_power_limit > 0)
+    {
+        referee_power_limit = referee_data->GameRobotState.chassis_power_limit;
+    }
+
+    // 超级电容控制: 当电容能量低于65时关闭DC-DC，避免过放
+    uint8_t enableDCDC = (cap->cap_msg.capEnergy >= 95) ? 1 : 0;
     
     // 功率限制: DC-DC开启时使用超电输出功率，关闭时固定
     if (enableDCDC) {
-        chassis_powerlimit = CHASSIS_POWER_LIMIT + cap->cap_msg.chassisPowerLimit;
+        chassis_powerlimit = referee_power_limit + cap->cap_msg.chassisPowerLimit;
     } else {
-        chassis_powerlimit = CHASSIS_POWER_LIMIT; 
+        chassis_powerlimit = referee_power_limit - 10; 
     }
-        ChassisPowerSet(chassis_powerlimit);
+    ChassisPowerSet(chassis_powerlimit);
     static uint32_t cnt = 0;
     if ((cnt++) % 125 == 0)  // 125*2ms=250ms
     {
@@ -590,7 +579,6 @@ static void LimitChassisOutput()
     }
     
     rotate_speed_buff = 1.5;
-    chassis_power_buff = 3.0;
 
     // 混合控制模式: 设置目标速度，前馈已在GlobalObserverCalculate中更新
     // 电机模块会自动使用速度环+电流前馈
@@ -635,8 +623,8 @@ static void LimitChassisOutput()
     // 超级电容控制: 发送裁判系统功率限制和能量缓冲区  
     struct CapTxMsg cap_msg = {
         .enableDCDC = enableDCDC,
-        .systemRestart = 0, //restart,
-        .RefereePowerLimit = CHASSIS_POWER_LIMIT,
+        .systemRestart = restart, //restart,
+        .RefereePowerLimit = referee_power_limit,
         .RefereeEnergyBuffer = 60,
     };
     SuperCapSend(cap, (uint8_t*)&cap_msg);
@@ -848,7 +836,9 @@ void ChassisTask()
         break;
 #endif
     case CHASSIS_ROTATE: // 自旋,同时保持全向机动;当前wz维持定值,后续增加不规则的变速策略
-        chassis_cmd_recv.wz = 10000*rotate_speed_buff;
+        chassis_cmd_recv.wz = CHASSIS_ROTATE_BASE_WZ * rotate_speed_buff;
+        if (chassis_cmd_recv.dash_mode == DASH_ON)
+            chassis_cmd_recv.wz *= CHASSIS_ROTATE_DASH_RATIO;
         break;
     default:
         break;

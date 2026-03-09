@@ -126,6 +126,9 @@ float Dot3d(float* v1, float* v2);
 
 float Index(uint8_t condition);
 
+//平滑符号函数 (边界层法), 输出[-1, 1]
+float SmoothSign(float s, float phi);
+
 //���ȸ�ʽ��Ϊ-PI~PI
 #define rad_format(Ang) loop_float_constrain((Ang), -PI, PI)
 

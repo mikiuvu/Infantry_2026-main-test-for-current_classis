@@ -144,10 +144,10 @@ void MX_FREERTOS_Init(void) {
   daemonTaskHandle = osThreadCreate(osThread(daemontask), NULL);
 
   osThreadDef(robottask, StartROBOTTASK, osPriorityAboveNormal, 0, 1024);
-  defaultTaskHandle = osThreadCreate(osThread(robottask), NULL);
+  robotTaskHandle = osThreadCreate(osThread(robottask), NULL);
 
-  // osThreadDef(uitask, StartUITASK, osPriorityNormal, 0, 512);
-  // defaultTaskHandle = osThreadCreate(osThread(uitask), NULL);
+  osThreadDef(uitask, StartUITASK, osPriorityNormal, 0, 512);
+  uiTaskHandle = osThreadCreate(osThread(uitask), NULL);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -226,11 +226,11 @@ void StartROBOTTASK(void const *argument)
 
 void StartUITASK(void const *argument)
 {
- // My_UI_init();
+  My_UI_init();
   while (1)
   {
-    // My_UI_init();
-    // Referee_Interactive_task();
+    Referee_Interactive_task();
+    osDelay(30);
   }
 }
 /* USER CODE END Application */

@@ -136,6 +136,13 @@ referee_info_t *RefereeInit(UART_HandleTypeDef *referee_usart_handle)
 void RefereeSend(uint8_t *send, uint16_t tx_len)
 {
 	static TickType_t xLastWakeTime;
+	static uint8_t delay_initialized;
+
 	USARTSend(referee_usart_instance, send, tx_len, USART_TRANSFER_DMA);
-	vTaskDelayUntil(&xLastWakeTime, 120);
+	if (!delay_initialized)
+	{
+		xLastWakeTime = xTaskGetTickCount();
+		delay_initialized = 1;
+	}
+	vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(120));
 }

@@ -202,3 +202,17 @@ float Index(uint8_t condition)
     else
         return 0.0f;
 }
+
+/**
+ * @brief 平滑符号函数 (边界层法)
+ * @param s 输入值
+ * @param phi 边界层厚度
+ * @return 平滑后的符号值 [-1, 1]
+ */
+float SmoothSign(float s, float phi)
+{
+    if (phi < 0.001f) phi = 0.001f;
+    if (fabsf(s) < phi)
+        return s / phi;
+    return (s > 0.0f) ? 1.0f : -1.0f;
+}

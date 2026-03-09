@@ -308,6 +308,12 @@ void VisionSetFlag(Detect_Color_e Detect_color, Work_Mode_e work_mode, Bullet_Sp
 void VisionSetAltitude(float yaw, float pitch, float roll);
 
 /**
+ * @brief 获取当前实际发送给视觉的数据缓存(只读)
+ * @return Vision_Send_s* 指向内部发送缓存的指针
+ */
+const Vision_Send_s *VisionGetSendData(void);
+
+/**
  * @brief 设置导航状态数据
  * @param nav_data 导航状态值(0-255)
  *                 - 可用于传输地图状态、导航模式等信息

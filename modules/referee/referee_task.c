@@ -18,6 +18,8 @@ static Referee_Interactive_info_t *Interactive_data; // UI绘制需要的机器�
 static referee_info_t *referee_recv_info;            // 接收到的裁判系统数据
 uint8_t UI_Seq;                               // 包序号，供整个referee文件使用
 int StartAngle, EndAngle;                // 圆弧绘制用的起始角度和终止角度
+static uint8_t ui_initialized = 0;
+static ui_mode_e last_ui_mode = UI_KEEP;
 
 /**
  * @brief  判断各种ID，选择客户端ID
@@ -49,6 +51,17 @@ referee_info_t *Referee_Interactive_init(UART_HandleTypeDef *referee_usart_handl
 
 void Referee_Interactive_task()
 {
+    if (Interactive_data == NULL || referee_recv_info == NULL)
+    {
+        return;
+    }
+
+    if (!ui_initialized || (Interactive_data->ui_mode == UI_REFRESH && last_ui_mode != UI_REFRESH))
+    {
+        My_UI_init();
+    }
+
+    last_ui_mode = Interactive_data->ui_mode;
     My_UI_Refresh(referee_recv_info, Interactive_data);
 }
 
@@ -66,8 +79,7 @@ static Graph_Data_t UI_aim_circle[2]; //瞄准准圈
 
 void My_UI_init()
 {
-    
-    if(Interactive_data->ui_mode == UI_KEEP)
+    if (Interactive_data == NULL || referee_recv_info == NULL)
     {
         return;
     }
@@ -90,7 +102,7 @@ void My_UI_init()
     UI_ReFresh(&referee_recv_info->referee_id, 2, UI_shoot_line[0], UI_shoot_line[1]);
 
     // 绘制车身位姿
-    Rectangle_Draw(&UI_position_line[0], "ss4", UI_Graph_ADD, 0, UI_Color_White, 3, 1650, 400, 1740, 540);
+    Rectangle_Draw(&UI_position_line[0], "sp0", UI_Graph_ADD, 0, UI_Color_White, 3, 1650, 400, 1740, 540);
     Arc_Draw(&UI_position_line[1], "sd5", UI_Graph_ADD, 8, UI_Color_Main, 270, 90, 3, 1695, 470, 40, 40);
     UI_ReFresh(&referee_recv_info->referee_id, 2, UI_position_line[0], UI_position_line[1]);
 
@@ -131,13 +143,15 @@ void My_UI_init()
 
 
     // 能量条框
-    Rectangle_Draw(&UI_Energy[0], "ss3", UI_Graph_ADD, 0, UI_Color_Pink, 7, 752, 81, 1138, 111);
+    Rectangle_Draw(&UI_Energy[0], "se0", UI_Graph_ADD, 0, UI_Color_Pink, 7, 752, 81, 1138, 111);
     UI_ReFresh(&referee_recv_info->referee_id, 1, UI_Energy[0]);
 
 
     // 能量条初始状态
     Line_Draw(&UI_Energy[1], "sd4", UI_Graph_ADD, 8, UI_Color_Green, 30, 755, 97, 1165, 97);
     UI_ReFresh(&referee_recv_info->referee_id, 1, UI_Energy[1]);
+
+    ui_initialized = 1;
 }
 
 
@@ -160,7 +174,7 @@ static void My_UI_Refresh(referee_info_t *referee_recv_info, Referee_Interactive
             break;
         }
         Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[0]);
-        _Interactive_data->Referee_Interactive_Flag.chassis_flag = 0;
+        _Interactive_data->Referee_Interactive_Flag.tracking_flag = 0;
     }
     // 摩擦轮
     if (_Interactive_data->Referee_Interactive_Flag.friction_flag == 1)
@@ -227,10 +241,12 @@ static void My_UI_Refresh(referee_info_t *referee_recv_info, Referee_Interactive
     case CHASSIS_ROTATE:
     {
         Arc_Draw(&UI_position_line[1], "sd5", UI_Graph_Change, 8, UI_Color_Main, 0, 360, 3, 1695, 470, 40, 40); //小陀螺模式则无需找头
+        break;
     }
     default:
     {
         Arc_Draw(&UI_position_line[1], "sd5", UI_Graph_Change, 8, UI_Color_Main, StartAngle, EndAngle, 3, 1695, 470, 40, 40);
+        break;
     }
     }
     
