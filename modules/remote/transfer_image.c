@@ -36,7 +36,7 @@ static void ana_image_rc(const uint8_t *image_buf)
     image_rc_ctrl[TEMP].rc.rocker_l_x = (((image_buf[6] >> 1) | (image_buf[7] << 7)) & 0x07FF) - IMAGE_REMOTE_VALUE_OFFSET;
 
     /* ---- 开关/按键数据解析 ---- */
-    image_rc_ctrl[TEMP].rc.switch_sw     = ((image_buf[7] >> 4) & 0x0003) + 1; // 存储值1/2/3对应UP/MID/DOWN
+    image_rc_ctrl[TEMP].rc.switch_sw     = ((image_buf[7] >> 4) & 0x0003) + 1; // 存储值1/2/3对应LEFT/MID/RIGHT
     image_rc_ctrl[TEMP].rc.key_stop      = (image_buf[7] >> 6) & 0x01;
     image_rc_ctrl[TEMP].rc.userkey_right = (image_buf[7] >> 7) & 0x01;
     image_rc_ctrl[TEMP].rc.userkey_left  = image_buf[8] & 0x01;

@@ -22,15 +22,15 @@
 #define IMAGE_REMOTE_VALUE_OFFSET 1024
 #define IMAGE_REMOTE_VALUE_MAX    1684
 
-/* 开关档位定义 (协议解析中已+1, 存储值为1/2/3) */
-#define IMAGE_SW_UP   1
-#define IMAGE_SW_MID  2
-#define IMAGE_SW_DOWN 3
+/* 开关档位定义 (协议解析中已+1, 存储值为1/2/3: 左/中/右) */
+#define IMAGE_SW_LEFT  1
+#define IMAGE_SW_MID   2
+#define IMAGE_SW_RIGHT 3
 
 /* 开关判断宏 */
-#define img_switch_is_up(s)   ((s) == IMAGE_SW_UP)
-#define img_switch_is_mid(s)  ((s) == IMAGE_SW_MID)
-#define img_switch_is_down(s) ((s) == IMAGE_SW_DOWN)
+#define img_switch_is_left(s)  ((s) == IMAGE_SW_LEFT)
+#define img_switch_is_mid(s)   ((s) == IMAGE_SW_MID)
+#define img_switch_is_right(s) ((s) == IMAGE_SW_RIGHT)
 
 /* ======================== 数据结构定义 ======================== */
 typedef struct
@@ -41,8 +41,8 @@ typedef struct
         int16_t rocker_r_y;    // 右摇杆Y轴
         int16_t rocker_l_x;    // 左摇杆X轴
         int16_t rocker_l_y;    // 左摇杆Y轴
-        uint8_t switch_sw;     // 三档开关 (IMAGE_SW_UP/MID/DOWN)
-        uint8_t key_stop;      // 停止按键
+        uint8_t switch_sw;     // 三档开关 (IMAGE_SW_LEFT/MID/RIGHT)
+        uint8_t key_stop;      // 急停按键(上升沿切换: 按一下急停, 再按一下恢复)
         uint8_t userkey_right; // 右侧按键
         uint8_t userkey_left;  // 左侧按键
         int16_t dial;          // 侧边拨轮

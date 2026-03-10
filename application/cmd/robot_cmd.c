@@ -78,7 +78,8 @@ static float yaw_ident_start_ms;
 static uint32_t yaw_ident_round_trip_count;
 
 uint8_t remote_flag = 0;  // 遥控器类型选择: 0=未选择, 1=DJI遥控(键鼠), 2=图传遥控
-uint8_t stop_flag = 0;    // 停止标志: 0=运行, 1=停止 (图传userkey左右同时按下切换)
+uint8_t stop_flag = 0;    // 急停锁存: 0=运行, 1=急停 (key_stop上升沿切换)
+uint8_t spin_flag = 0;    // 图传右侧按键自旋锁存: 0=关闭, 1=开启
 
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
 static void RefreshVisionRecvCache(void)
@@ -636,8 +637,8 @@ static void EmergencyHandler()
 
 /**
  * @brief 将图传遥控器数据转写到DJI遥控器数据结构, 实现统一控制路径
- * @note  与参考实现一致: switch_sw映射到switch_right, switch_left由remote_flag控制
- *        switch_sw映射: IMAGE(1/2/3) → DJI switch_right(1/3/2)
+ * @note  switch_sw映射到switch_right
+ *        switch_sw映射: LEFT(1)->UP(1), MID(2)->MID(3), RIGHT(3)->UP(1, 跟头模式)
  *        trigger覆盖dial为500
  */
 static void image_rc_data_To_rc_data_t(void)
@@ -649,16 +650,16 @@ static void image_rc_data_To_rc_data_t(void)
     rc_data[TEMP].rc.rocker_r1 = image_rc_data[TEMP].rc.rocker_r_y;
     switch (image_rc_data[TEMP].rc.switch_sw)
     {
-    case 0x01: rc_data[TEMP].rc.switch_right = 1; break; // UP→UP
-    case 0x02: rc_data[TEMP].rc.switch_right = 3; break; // MID→MID
-    case 0x03: rc_data[TEMP].rc.switch_right = 2; break; // DOWN→DOWN
+    case IMAGE_SW_LEFT:  rc_data[TEMP].rc.switch_right = 1; break; // LEFT -> UP(跟头)
+    case IMAGE_SW_MID:   rc_data[TEMP].rc.switch_right = 3; break; // MID  -> MID(云台底盘分离)
+    case IMAGE_SW_RIGHT: rc_data[TEMP].rc.switch_right = 1; break; // RIGHT-> UP(跟头)
     }
     if (image_rc_data[TEMP].rc.trigger)
         rc_data[TEMP].rc.dial = 500;
 }
 
 /**
- * @brief 图传遥控器 - 键鼠控制模式 (switch_sw == UP)
+ * @brief 图传遥控器 - 键鼠控制模式 (switch_sw == LEFT)
  * @note  与原遥控器键鼠模式逻辑基本一致, 使用图传遥控器的键鼠数据
  */
 static void ImageMouseKeySet()
@@ -669,6 +670,7 @@ static void ImageMouseKeySet()
     Limitshoot();
     chassis_speed_buff = CHASSIS_TRANSLATE_BASE_SPEED;
     chassis_cmd_send.chassis_power_buff = 1;
+    shoot_cmd_send.shoot_mode = SHOOT_ON;
     gimbal_cmd_send.gimbal_mode = GIMBAL_FREE_MODE;
 
     // X键刷新UI
@@ -734,7 +736,7 @@ static void ImageMouseKeySet()
     switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_E] % 2)
     {
     case 0:  shoot_cmd_send.load_mode = LOAD_BURSTFIRE; break;
-    default: shoot_cmd_send.load_mode = LOAD_BURSTFIRE; break;
+    default: shoot_cmd_send.load_mode = LOAD_3_BULLET; break;
     }
     // 鼠标左键射击
     switch (image_rc_data[TEMP].mouse.press_l)
@@ -759,6 +761,11 @@ static void ImageMouseKeySet()
 #endif
     }
 
+    if (image_rc_data[TEMP].mouse.press_m)
+    {
+        shoot_cmd_send.load_mode = LOAD_REVERSE;
+    }
+
     // F键摩擦轮
     switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_F] % 2)
     {
@@ -771,6 +778,7 @@ static void ImageMouseKeySet()
     case 0:  chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW; break;
     default: chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;            break;
     }
+
     // Shift超级电容
     switch (image_rc_data[TEMP].key[KEY_PRESS].shift)
     {
@@ -839,9 +847,27 @@ void RobotCMDTask()
     // ======== 控制源选择: 图传优先, 两者都离线则失能 ========
     if (ImageRemoteIsOnline())
     {
-        // 图传急停: switch DOWN / key_stop
-        if (image_rc_data[TEMP].rc.switch_sw == IMAGE_SW_DOWN ||
-            image_rc_data[TEMP].rc.key_stop)
+        static uint8_t last_key_stop = 0;
+        static uint8_t last_userkey_right = 0;
+        uint8_t current_key_stop = image_rc_data[TEMP].rc.key_stop;
+        uint8_t current_userkey_right = image_rc_data[TEMP].rc.userkey_right;
+
+        // key_stop改为按键切换: 上升沿触发急停状态翻转
+        if (current_key_stop && !last_key_stop)
+        {
+            stop_flag = !stop_flag;
+        }
+        last_key_stop = current_key_stop;
+
+        // 右侧按键改为按键切换: 上升沿触发自旋状态翻转
+        if (current_userkey_right && !last_userkey_right)
+        {
+            spin_flag = !spin_flag;
+        }
+        last_userkey_right = current_userkey_right;
+
+        // 图传急停锁存开启时强制零力矩
+        if (stop_flag)
         {
             rc_data[TEMP].rc.switch_right = 0;
         }
@@ -849,9 +875,13 @@ void RobotCMDTask()
         {
             // 转写图传数据到rc_data (摇杆 + switch_right)
             image_rc_data_To_rc_data_t();
-            // 模式选择: UP→键鼠(1), MID→摇杆(2)
+            if (spin_flag)
+            {
+                rc_data[TEMP].rc.switch_right = 2;
+            }
+            // 模式选择: LEFT→键鼠(1), MID/RIGHT→摇杆(2)
             rc_data[TEMP].rc.switch_left =
-                (image_rc_data[TEMP].rc.switch_sw == IMAGE_SW_UP) ? 1 : 2;
+                (image_rc_data[TEMP].rc.switch_sw == IMAGE_SW_LEFT) ? 1 : 2;
             // 拷贝鼠标键盘数据
             memcpy(&rc_data[TEMP].mouse, &image_rc_data[TEMP].mouse, sizeof(rc_data[TEMP].mouse));
             memcpy(&rc_data[TEMP].key, &image_rc_data[TEMP].key, sizeof(rc_data[TEMP].key));

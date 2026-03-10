@@ -351,9 +351,9 @@ DJIMotorInstance *DJIMotorInit(Motor_Init_Config_s *config)
     config->can_init_config.id = instance;                        // set id,eq to address(it is identity)
     instance->motor_can_instance = CANRegister(&config->can_init_config);
 
-    // 注册电机离线检测 daemon (200ms超时, DaemonTask以1ms运行)
+    // DaemonTask 当前以 100Hz 运行, 这里用 20 个节拍对应约 200ms 的电机离线判定窗口。
     Daemon_Init_Config_s daemon_conf = {
-        .reload_count = 200,
+        .reload_count = 20,
         .callback = NULL,  // 电机离线时不执行额外回调，由用户主动查询
         .owner_id = instance,
     };

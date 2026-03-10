@@ -118,11 +118,11 @@ static uint8_t observer_inited = 0;
 #define SMC_ESO_RESET_THRESHOLD  30   // 静止检测阈值 (30*2ms=60ms)
 static uint32_t zero_input_cnt = 0;    // 零输入计数器
 
-// 超电重启冷却时间 (500*2ms=1s)
+// 超电重启冷却时间 (*2ms)
 #define CAP_RESTART_COOLDOWN 2000
 
 /* 根据robot_def.h中的macro自动计算的参数 */
-float L=200; //轮轴距中心距离
+float L=155; //轮轴距中心距离
 #define PERIMETER_WHEEL (RADIUS_WHEEL * 2 * PI) // 轮子周长
 
 /* 底盘应用包含的模块和信息存储,底盘是单例模式,因此不需要为底盘建立单独的结构体 */
@@ -553,6 +553,14 @@ struct CapTxMsg
     uint8_t resv1[3];             // 保留3个字节
 } __attribute__((packed));
 static float chassis_powerlimit = 0;
+
+// 控制量突变检测参数
+#define CMD_BURST_VX_THRESHOLD   500.0f   // vx突变阈值
+#define CMD_BURST_VY_THRESHOLD   500.0f   // vy突变阈值
+#define CMD_BURST_WZ_THRESHOLD   200.0f   // wz突变阈值
+#define CMD_BURST_DURATION       1000     // 突变功率提升持续时间 (1000*2ms=2s)
+#define CMD_BURST_POWER_BOOST    50.0f    // 突变功率提升量 (W)
+
 static void LimitChassisOutput()
 {   
     uint16_t referee_power_limit = CHASSIS_POWER_LIMIT;
@@ -562,14 +570,43 @@ static void LimitChassisOutput()
         referee_power_limit = referee_data->GameRobotState.chassis_power_limit;
     }
 
-    // 超级电容控制: 当电容能量低于65时关闭DC-DC，避免过放
-    uint8_t enableDCDC = (cap->cap_msg.capEnergy >= 95) ? 1 : 0;
-    
-    // 功率限制: DC-DC开启时使用超电输出功率，关闭时固定
-    if (enableDCDC) {
-        chassis_powerlimit = referee_power_limit + cap->cap_msg.chassisPowerLimit;
+    // ==================== 控制量突变检测 ====================
+    static float last_cmd_vx = 0, last_cmd_vy = 0, last_cmd_wz = 0;
+    static uint32_t burst_timer = 0;
+
+    float delta_vx = fabsf(chassis_cmd_recv.vx - last_cmd_vx);
+    float delta_vy = fabsf(chassis_cmd_recv.vy - last_cmd_vy);
+    float delta_wz = fabsf(chassis_cmd_recv.wz - last_cmd_wz);
+
+    last_cmd_vx = chassis_cmd_recv.vx;
+    last_cmd_vy = chassis_cmd_recv.vy;
+    last_cmd_wz = chassis_cmd_recv.wz;
+
+    if (delta_vx > CMD_BURST_VX_THRESHOLD ||
+        delta_vy > CMD_BURST_VY_THRESHOLD ||
+        delta_wz > CMD_BURST_WZ_THRESHOLD) {
+        burst_timer = CMD_BURST_DURATION;
+    }
+    if (burst_timer > 0) burst_timer--;
+
+    // ==================== 超级电容功率限制 ====================
+    uint16_t cap_energy = cap->cap_msg.capEnergy;
+
+    if (cap_energy >= 150) {
+        // 高能量: 额外提供20W, 同时允许突变加速
+        chassis_powerlimit = referee_power_limit + 20;
+        if (burst_timer > 0) {
+            chassis_powerlimit += CMD_BURST_POWER_BOOST;
+        }
+    } else if (cap_energy > 75) {
+        // 中能量: 不额外提供功率, 但允许突变加速
+        chassis_powerlimit = referee_power_limit;
+        if (burst_timer > 0) {
+            chassis_powerlimit += CMD_BURST_POWER_BOOST;
+        }
     } else {
-        chassis_powerlimit = referee_power_limit - 10; 
+        // 低能量: 降功率, 不允许突变加速
+        chassis_powerlimit = referee_power_limit - 10;
     }
     ChassisPowerSet(chassis_powerlimit);
     static uint32_t cnt = 0;
@@ -622,8 +659,8 @@ static void LimitChassisOutput()
     
     // 超级电容控制: 发送裁判系统功率限制和能量缓冲区  
     struct CapTxMsg cap_msg = {
-        .enableDCDC = enableDCDC,
-        .systemRestart = 0, //restart,
+        .enableDCDC = 1,
+        .systemRestart = restart, //restart,
         .RefereePowerLimit = referee_power_limit,
         .RefereeEnergyBuffer = 60,
     };

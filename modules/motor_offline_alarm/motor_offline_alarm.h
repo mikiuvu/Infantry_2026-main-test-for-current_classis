@@ -50,7 +50,7 @@
 #define ALARM_DEFAULT_BEEP_ON_MS       100   // 默认响持续时间(ms)
 #define ALARM_DEFAULT_BEEP_OFF_MS      300   // 默认声间间隔时间(ms)
 #define ALARM_DEFAULT_BEEP_TAIL_MS     1000  // 默认两轮报警间隔(ms)
-#define ALARM_FREQ_HIGH                800   // 高音调 800Hz (云台/发射)
+#define ALARM_FREQ_HIGH                4000   // 高音调 800Hz (云台/发射)
 #define ALARM_FREQ_LOW                 400   // 低音调 400Hz (底盘)
 
 /**
