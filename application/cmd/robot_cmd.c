@@ -1241,7 +1241,7 @@ void RobotCMDTask()
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     // VCP/UART协议 - 设置标志位和姿态角度
     const Vision_Send_s *vision_send_data = VisionGetSendData();
-    VisionSetFlag(chassis_fetch_data.self_color, vision_work_mode, GetVisionBulletSpeedFlag(chassis_fetch_data.bullet_speed));
+    VisionSetFlag(chassis_fetch_data.self_color, vision_work_mode, chassis_fetch_data.bullet_speed);
     VisionSetAltitude(loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f), 
                       gimbal_fetch_data.gimbal_imu_data.Pitch, 
                       gimbal_fetch_data.gimbal_imu_data.Roll);
