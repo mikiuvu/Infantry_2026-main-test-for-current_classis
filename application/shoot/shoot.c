@@ -6,7 +6,7 @@
 #include "general_def.h"
 #include "servo_motor.h"
 #include "motor_offline_alarm.h" // 电机离线检测
-
+#include "vofa.h"
 #ifdef USE_LASER_POINTER
 /* ======================== 激光笔模式 ======================== */
 #include "bsp_gpio.h"
@@ -87,6 +87,8 @@ static Subscriber_t *shoot_sub;
 static Shoot_Upload_Data_s shoot_feedback_data; // 来自gimbal_cmd的发射控制信息
 
 // 拨弹盘前馈
+static float last_bullet_speed_feedback = 0.0f;
+static float friction_ref = SHOOT_FRICTION_BASE_REF;
 static float loader_current_forward = 0;
 
 // dwt定时
@@ -105,6 +107,35 @@ static uint8_t LoaderBlockedDetected(void)
            abs(loader->measure.real_current) > BLOCK_CURRENT_THRESHOLD;
 }
 
+static float ClampFrictionRef(float ref)
+{
+    if (ref < SHOOT_FRICTION_REF_MIN)
+        return SHOOT_FRICTION_REF_MIN;
+    if (ref > SHOOT_FRICTION_REF_MAX)
+        return SHOOT_FRICTION_REF_MAX;
+    return ref;
+}
+
+static void UpdateFrictionRefByBulletSpeed(float bullet_speed)
+{
+    float speed_error;
+
+    if (bullet_speed < 5.0f || bullet_speed > 40.0f)
+        return;
+
+    if (fabsf(bullet_speed - last_bullet_speed_feedback) < 0.05f)
+        return;
+
+    last_bullet_speed_feedback = bullet_speed;
+    speed_error = SHOOT_BULLET_SPEED_TARGET - bullet_speed;
+
+    if (fabsf(speed_error) < SHOOT_BULLET_SPEED_DEADBAND)
+        return;
+
+    friction_ref += SHOOT_FRICTION_SPEED_KP * speed_error;
+    friction_ref = ClampFrictionRef(friction_ref);
+}
+
 // 发射电机离线检测实例
 static MotorOfflineAlarmInstance *shoot_offline_alarm = NULL;
 
@@ -118,8 +149,8 @@ void ShootInit()
         },
         .controller_param_init_config = {
             .speed_PID = {
-                .Kp = 5, //20
-                .Ki = 1, //1
+                .Kp = 10, //20
+                .Ki = 3, //1
                 .Kd = 0,
                 .Derivative_LPF_RC = 0.02,
                 .Improve = PID_Integral_Limit | PID_Trapezoid_Intergral | PID_DerivativeFilter,
@@ -154,7 +185,7 @@ void ShootInit()
         .controller_param_init_config = {
             .speed_PID = {
                 .Kp = 10, //20
-                .Ki = 1, //1
+                .Ki = 3, //1
                 .Kd = 0,
                 .Derivative_LPF_RC = 0.02,
                 .Improve = PID_Integral_Limit | PID_Trapezoid_Intergral | PID_DerivativeFilter,
@@ -193,15 +224,15 @@ void ShootInit()
         .controller_param_init_config = {
             .angle_PID = {
                 // 如果启用位置环来控制发弹,需要较大的I值保证输出力矩的线性度否则出现接近拨出的力矩大幅下降
-                .Kp = 18, //10
-                .Ki = 0.8,
+                .Kp = 38, //10
+                .Ki = 2.8,
                 .Kd = 0,
                 .MaxOut = 20000,
             },
             .speed_PID = {
-                .Kp = 3.0, //0
-                .Ki = 2.0, //0
-                .Kd = 0.002,
+                .Kp = 1.5, //0
+                .Ki = 2.0, //02.0
+                .Kd = 0.0, //
                 .Improve = PID_Integral_Limit | PID_ErrorHandle,
                 .IntegralLimit = 400,//200
                 .MaxOut = 12000,
@@ -233,6 +264,7 @@ void ShootInit()
     // 发射电机离线检测配置 
     MotorOfflineAlarmConfig_t shoot_alarm_cfg = {
         .motors = {loader, friction_l, friction_r},
+        .is_online = DJIMotorIsOnline,
         .beep_times = {3, 4, 5},        // loader=3声, friction_l=4声, friction_r=5声
         .motor_count = 3,
         .buzzer_freq = ALARM_FREQ_HIGH, // 高音调
@@ -246,7 +278,7 @@ void ShootTask()
 {
     // 电机离线报警: loader=3声, friction_l=4声, friction_r=5声
     MotorOfflineAlarmTask(shoot_offline_alarm);
-    
+    //VOFA(0,loader->measure.angle_single_round,loader->measure.speed_aps,loader->measure.real_current,shoot_cmd_recv.load_mode == LOAD_REVERSE);
     // 从 cmd获取控制数据
     SubGetMessage(shoot_sub, &shoot_cmd_recv);
     // 对shoot mode等于SHOOT_STOP的情况特殊处理,直接停止所有电机(紧急停止)
@@ -255,6 +287,8 @@ void ShootTask()
         DJIMotorStop(friction_l);
         DJIMotorStop(friction_r);
         DJIMotorStop(loader);
+        friction_ref = SHOOT_FRICTION_BASE_REF;
+        last_bullet_speed_feedback = 0.0f;
     }
     else // 恢复运行
     {
@@ -264,30 +298,11 @@ void ShootTask()
     }
     if (shoot_cmd_recv.friction_mode == FRICTION_ON)
     {
-        // 根据收到的弹速设置设定摩擦轮电机参考值,需实测后填入
-        // switch (shoot_cmd_recv.bullet_speed)
-        // {
-        // case SMALL_AMU_15:
-        //     DJIMotorSetRef(friction_l, 26800);
-        //     DJIMotorSetRef(friction_r, 26800);
-        //     break;
-        // case SMALL_AMU_18:
-        //     DJIMotorSetRef(friction_l, 30000);
-        //     DJIMotorSetRef(friction_r, 30000);
-        //     break;
-        // case SMALL_AMU_30:
-        //     DJIMotorSetRef(friction_l, 46500);
-        //     DJIMotorSetRef(friction_r, 46500);
-        //     break;
-        // default: // 当前为了调试设定4000
-        //     DJIMotorSetRef(friction_l, 40500);
-        //     DJIMotorSetRef(friction_r, 40000);
-        //     break;
-        // } 
+        UpdateFrictionRefByBulletSpeed(shoot_cmd_recv.bullet_speed);
         DJIMotorOuterLoop(friction_l, SPEED_LOOP);
         DJIMotorOuterLoop(friction_r, SPEED_LOOP);
-        DJIMotorSetRef(friction_l, 30000);//40000
-        DJIMotorSetRef(friction_r, 30000);
+        DJIMotorSetRef(friction_l, friction_ref);
+        DJIMotorSetRef(friction_r, friction_ref);
     }
     else // 关闭摩擦轮
     {
@@ -295,7 +310,8 @@ void ShootTask()
         DJIMotorOuterLoop(friction_r, OPEN_LOOP);
         DJIMotorSetRef(friction_l, 0);
         DJIMotorSetRef(friction_r, 0);
-
+        friction_ref = SHOOT_FRICTION_BASE_REF;
+        last_bullet_speed_feedback = 0.0f;
     }
     // 如果上一次触发单发或3发指令的时间加上不应期仍然大于当前时间(尚未休眠完毕),直接返回即可
     // 单发模式主要提供给能量机关激活使用(以及英雄的射击大部分处于单发)

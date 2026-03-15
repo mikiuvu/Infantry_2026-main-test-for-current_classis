@@ -177,9 +177,9 @@ void ChassisInit()
         .controller_param_init_config = {
             // 速度环 (主控制)
             .speed_PID = {
-                .Kp = 4.0f,
+                .Kp = 3.0f,
                 .Ki = 0.0f,
-                .Kd = 0.0f,
+                .Kd = 0.005f,
                 .IntegralLimit = 3000,
                 .Improve = PID_Integral_Limit,
                 .MaxOut = 15000,
@@ -335,12 +335,13 @@ void ChassisInit()
  * @note 输入输出单位均为 degree/s (电机转子角速度)
  */
 static void MecanumCalculate()
-{   
+{
     // X型全向轮逆运动学: 底盘速度 -> 各轮速度 (单位: degree/s)
     vt_lf = (-chassis_vx - chassis_vy) / Sqrt(2) + chassis_cmd_recv.wz * CENTER2;
     vt_rf = (chassis_vx - chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER1;
     vt_lb = (-chassis_vx + chassis_vy) / Sqrt(2) - chassis_cmd_recv.wz * CENTER3;
     vt_rb = (chassis_vx + chassis_vy) / Sqrt(2) + chassis_cmd_recv.wz * CENTER4;
+
 }
 
 /**
@@ -558,7 +559,7 @@ static float chassis_powerlimit = 0;
 #define CMD_BURST_VX_THRESHOLD   500.0f   // vx突变阈值
 #define CMD_BURST_VY_THRESHOLD   500.0f   // vy突变阈值
 #define CMD_BURST_WZ_THRESHOLD   200.0f   // wz突变阈值
-#define CMD_BURST_DURATION       1000     // 突变功率提升持续时间 (1000*2ms=2s)
+#define CMD_BURST_DURATION       700     // 突变功率提升持续时间 (1000*2ms=2s)
 #define CMD_BURST_POWER_BOOST    50.0f    // 突变功率提升量 (W)
 
 static void LimitChassisOutput()
@@ -615,7 +616,7 @@ static void LimitChassisOutput()
         rotate_speed_buff = pos_variable_rotate_speed[GetRandomInt(0, 7)];
     }
     
-    // rotate_speed_buff = 1.5;
+    rotate_speed_buff = 1.5;
 
     // 混合控制模式: 设置目标速度，前馈已在GlobalObserverCalculate中更新
     // 电机模块会自动使用速度环+电流前馈
@@ -699,27 +700,23 @@ static float EstimateSpeed()
     float imu_accel_x = -Chassis_INS_data->MotionAccel_b[0] * 1000.0f;
     float imu_accel_y = Chassis_INS_data->MotionAccel_b[1] * 1000.0f;
     
-    // IMU安装偏移补偿: a_center = a_imu - omega × (omega × r) - alpha × r
-    // 需要补偿两种加速度:
-    // 1. 向心加速度: a_cent = omega^2 * r (指向旋转中心)
-    // 2. 切向加速度: a_tang = alpha * r (角加速度引起)
+    // IMU安装偏移补偿: a_center = a_imu - [alpha × r + omega × (omega × r)]
+    // 这里只考虑底盘绕Z轴转动，r = [imu_offset_x, imu_offset_y, 0]
+    // 因此补偿到XY平面后的结果为:
+    // a_comp_x = omega_z^2 * r_x - alpha_z * r_y
+    // a_comp_y = omega_z^2 * r_y + alpha_z * r_x
     
     // 获取Yaw轴角速度和角加速度
     float omega_yaw = Chassis_INS_data->Gyro[2];       // Z轴角速度 (rad/s)
     float alpha_yaw = Chassis_INS_data->GyroAlpha[2];  // Z轴角加速度 (rad/s^2)
     
     float omega_yaw_sq = omega_yaw * omega_yaw;
+    float accel_comp_x = omega_yaw_sq * imu_offset_x - alpha_yaw * imu_offset_y;
+    float accel_comp_y = omega_yaw_sq * imu_offset_y + alpha_yaw * imu_offset_x;
     
-    // ========== 1. 向心加速度补偿 ==========
-    // Yaw旋转补偿 (绕Z轴): X/Y方向偏移产生X/Y方向向心加速度
-    imu_accel_x -= omega_yaw_sq * imu_offset_x;
-    imu_accel_y -= omega_yaw_sq * imu_offset_y;
-    
-    // ========== 2. 切向加速度补偿 ==========
-    // 切向加速度公式: a_tang = alpha × r
-    // Yaw角加速度 (绕Z轴): a_tang_x = -alpha_z * r_y, a_tang_y = alpha_z * r_x
-    imu_accel_x -= (-alpha_yaw * imu_offset_y);  // 注意符号
-    imu_accel_y -= (alpha_yaw * imu_offset_x);   // 不补偿会导致自旋时y轴突变
+    // 组合补偿项: 向心项与切向项合并后统一扣除
+    imu_accel_x -= accel_comp_x;
+    imu_accel_y -= accel_comp_y;
 
     // ==================== IMU原始积分速度（开环，用于调试对比，正式上车时删除） ====================
     static float imu_raw_vx = 0.0f;  // IMU开环积分速度X
@@ -798,11 +795,11 @@ static float EstimateSpeed()
     }
     
     // VOFA+调试输出
-    VOFA(0, imu_raw_vx, imu_raw_vy, wheel_vx, wheel_vy,
-         chassis_feedback_data.real_vx, chassis_feedback_data.real_vy, 
-         imu_accel_x, imu_accel_y, 
-         (float)wheel_slip[0].is_slipping, (float)wheel_slip[1].is_slipping,
-         (float)wheel_slip[2].is_slipping, (float)wheel_slip[3].is_slipping);
+    // VOFA(0, imu_raw_vx, imu_raw_vy, wheel_vx, wheel_vy,
+    //      chassis_feedback_data.real_vx, chassis_feedback_data.real_vy, 
+    //      imu_accel_x, imu_accel_y, 
+    //      (float)wheel_slip[0].is_slipping, (float)wheel_slip[1].is_slipping,
+    //      (float)wheel_slip[2].is_slipping, (float)wheel_slip[3].is_slipping);
     
     // ==================== 卡尔曼R值调整 ====================
     // 根据打滑轮数量调整: 打滑轮越多，轮速可信度越低
@@ -919,8 +916,13 @@ void ChassisTask()
     ui_data.Pitch_angle = -chassis_cmd_recv.pitch_angle;
     ui_data.offset_angle = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode = chassis_cmd_recv.aim_mode;
-    ui_data.capEnergy = cap->cap_msg.capEnergy;  // 超级电容未启用时注释掉
-
+    ui_data.capEnergy = cap->cap_msg.capEnergy; 
+    
+    VOFA(0,vt_lf, vt_rf, vt_lb, vt_rb, 
+        motor_lb->measure.speed_aps,motor_lb->measure.real_current,
+        motor_rf->measure.speed_aps,motor_rf->measure.real_current, 
+        motor_lf->measure.speed_aps,motor_lf->measure.real_current,
+        motor_rb->measure.speed_aps,motor_rb->measure.real_current);
     // 推送反馈消息
 #ifdef CHASSIS_ONLY
     PubPushMessage(chassis_pub, (void *)&chassis_feedback_data);

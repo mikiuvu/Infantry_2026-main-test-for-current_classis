@@ -155,14 +155,16 @@ static void _RunStateMachine(void)
     float now = DWT_GetTimeline_ms();
     float elapsed = now - _state_ts;
 
+    // 全离线降调具有最高优先级,在普通蜂鸣过程中也可直接抢占
+    if (_state != ST_DESC && _state != ST_DESC_COOL && _AllMotorsOffline()) {
+        BuzzerOnRaw(DESC_START_VAL / 1000, 10000);
+        _EnterState(ST_DESC, now);
+        return;
+    }
+
     switch (_state) {
 
     case ST_IDLE: {
-        if (_AllMotorsOffline()) {
-            BuzzerOnRaw(DESC_START_VAL / 1000, 10000);
-            _EnterState(ST_DESC, now);
-            break;
-        }
         uint16_t freq;
         uint8_t times;
         uint16_t on_ms, off_ms, tail_ms;
@@ -216,8 +218,14 @@ static void _RunStateMachine(void)
     }
 
     case ST_DESC_COOL:
-        if (elapsed >= (float)DESC_COOLDOWN_MS)
-            _EnterState(ST_IDLE, now);
+        if (elapsed >= (float)DESC_COOLDOWN_MS) {
+            if (_AllMotorsOffline()) {
+                BuzzerOnRaw(DESC_START_VAL / 1000, 10000);
+                _EnterState(ST_DESC, now);
+            } else {
+                _EnterState(ST_IDLE, now);
+            }
+        }
         break;
     }
 }

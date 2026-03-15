@@ -4,9 +4,9 @@
 #include "ins_task.h"
 #include "message_center.h"
 #include "general_def.h"
-#include "vofa.h" // VOFA+数据发送模块
+#include "vofa.h"
 #include "bmi088.h"
-#include "bsp_dwt.h"  // 用于获取精确时间间隔
+#include "bsp_dwt.h"  
 #include "motor_offline_alarm.h" // 电机离线检测
 
 static attitude_t *gimba_IMU_data; // 云台IMU数据
@@ -25,6 +25,16 @@ static float pitch_speed_feedforward = 0.0f;  // pitch速度前馈 (本地微分
 
 static float yaw_current_feedforward = 0.0f;    // yaw电流前馈
 static float pitch_current_feedforward = 0.0f;  // pitch电流前馈
+static float yaw_motion_current_feedforward = 0.0f;
+static float yaw_spin_current_feedforward = 0.0f;
+static float yaw_ref_speed_rad = 0.0f;
+static float yaw_ref_acc_rad = 0.0f;
+static float gimbal_wz_prev = 0.0f;
+static float chassis_wz_prev = 0.0f;
+static float gimbal_wz_acc_filtered = 0.0f;
+static float chassis_wz_acc_filtered = 0.0f;
+static float pitch_w_prev = 0.0f;
+static float pitch_w_acc_filtered = 0.0f;
 
 static float yaw_ref_prev = 0.0f;           // 上一次yaw目标角度
 static float pitch_ref_prev = 0.0f;         // 上一次pitch目标角度
@@ -46,6 +56,33 @@ static float feedforward_ramp_factor = 1.0f; // 渐变系数 (0~1)
 
 // 云台电机离线检测实例
 static MotorOfflineAlarmInstance *gimbal_offline_alarm = NULL;
+
+static float YawTauCScale(float omega_rad, float v_s_rad)
+{
+    float abs_ratio;
+
+    if (v_s_rad < 1e-4f)
+        v_s_rad = 1e-4f;
+
+    abs_ratio = fabsf(omega_rad / v_s_rad);
+    return (1.0f - expf(-(abs_ratio * abs_ratio))) * ((omega_rad > 0.0f) - (omega_rad < 0.0f));
+}
+
+static float YawTauSScale(float omega_rad, float v_s_rad)
+{
+    float abs_ratio;
+
+    if (v_s_rad < 1e-4f)
+        v_s_rad = 1e-4f;
+
+    abs_ratio = fabsf(omega_rad / v_s_rad);
+    return expf(-(abs_ratio * abs_ratio)) * ((omega_rad > 0.0f) - (omega_rad < 0.0f));
+}
+
+static float SelectByDirection(float omega_rad, float pos_value, float neg_value)
+{
+    return (omega_rad >= 0.0f) ? pos_value : neg_value;
+}
 
 void GimbalInit()
 {
@@ -228,6 +265,12 @@ void GimbalTask()
         pitch_speed_filtered = 0;
         yaw_acc_filtered = 0;
         pitch_acc_filtered = 0;
+        gimbal_wz_prev = gimba_IMU_data->Gyro[2];
+        chassis_wz_prev = chassis_real_speed.chassis_imu_data.Gyro[2];
+        gimbal_wz_acc_filtered = 0;
+        chassis_wz_acc_filtered = 0;
+        pitch_w_prev = gimba_IMU_data->Gyro[1];
+        pitch_w_acc_filtered = 0;
         last_feedforward_time = current_time;
         feedforward_initialized = 1;
         feedforward_ramp_factor = 1.0f;
@@ -262,10 +305,19 @@ void GimbalTask()
             pitch_speed_filtered = pitch_speed_filtered + speed_alpha * (pitch_speed_raw - pitch_speed_filtered);
             yaw_acc_filtered = yaw_acc_filtered + acc_alpha * (yaw_acc_raw - yaw_acc_filtered);
             pitch_acc_filtered = pitch_acc_filtered + acc_alpha * (pitch_acc_raw - pitch_acc_filtered);
+            gimbal_wz_acc_filtered = gimbal_wz_acc_filtered +
+                                     acc_alpha * (((gimba_IMU_data->Gyro[2] - gimbal_wz_prev) / dt) - gimbal_wz_acc_filtered);
+            chassis_wz_acc_filtered = chassis_wz_acc_filtered +
+                                      acc_alpha * (((chassis_real_speed.chassis_imu_data.Gyro[2] - chassis_wz_prev) / dt) - chassis_wz_acc_filtered);
+            pitch_w_acc_filtered = pitch_w_acc_filtered +
+                                   acc_alpha * (((gimba_IMU_data->Gyro[1] - pitch_w_prev) / dt) - pitch_w_acc_filtered);
             
             // 保存当前速度用于下次加速度计算
             yaw_speed_raw_prev = yaw_speed_raw;
             pitch_speed_raw_prev = pitch_speed_raw;
+            gimbal_wz_prev = gimba_IMU_data->Gyro[2];
+            chassis_wz_prev = chassis_real_speed.chassis_imu_data.Gyro[2];
+            pitch_w_prev = gimba_IMU_data->Gyro[1];
         }
         
         // 渐变恢复
@@ -282,25 +334,44 @@ void GimbalTask()
     
     // 应用渐变系数和前馈系数到前馈输出
     // 注意: yaw_speed_filtered 单位是 °/s, 但 Gyro 反馈是 rad/s, 需要转换
-    yaw_speed_feedforward = yaw_speed_filtered * feedforward_ramp_factor * YAW_SPEED_FF_COEF * DEGREE_2_RAD;
+    yaw_ref_speed_rad = yaw_speed_filtered * DEGREE_2_RAD;
+    yaw_ref_acc_rad = yaw_acc_filtered * DEGREE_2_RAD;
+    yaw_speed_feedforward = yaw_ref_speed_rad * feedforward_ramp_factor * YAW_SPEED_FF_COEF;
     pitch_speed_feedforward = pitch_speed_filtered * feedforward_ramp_factor * PITCH_SPEED_FF_COEF * DEGREE_2_RAD;
     
     // 电流前馈: 加速度(°/s²) → 力矩(N·m) → CAN原始值
     // τ_acc = J * α, α需要从°/s²转rad/s², 再通过NM_TO_GM6020_RAW转为CAN值
-    float yaw_acc_torque = YAW_INERTIA * yaw_acc_filtered * DEGREE_2_RAD;  // N·m
-    float yaw_acc_current = yaw_acc_torque * NM_TO_GM6020_RAW * feedforward_ramp_factor;
-    float pitch_acc_torque = PITCH_INERTIA * pitch_acc_filtered * DEGREE_2_RAD;  // N·m
-    float pitch_acc_current = pitch_acc_torque * NM_TO_GM6020_RAW * feedforward_ramp_factor;
+    float pitch_speed_rad = pitch_speed_filtered * DEGREE_2_RAD;
+    float pitch_acc_rad = pitch_acc_filtered * DEGREE_2_RAD;
+    float pitch_acc_current =
+        (
+            SelectByDirection(pitch_speed_rad, PITCH_BIAS_FF_RAW_POS, PITCH_BIAS_FF_RAW_NEG) +
+            SelectByDirection(pitch_speed_rad, PITCH_ACC_FF_COEF_RAW_POS, PITCH_ACC_FF_COEF_RAW_NEG) * pitch_acc_rad +
+            SelectByDirection(pitch_speed_rad, PITCH_W_FF_COEF_RAW_POS, PITCH_W_FF_COEF_RAW_NEG) * pitch_speed_rad
+        ) * feedforward_ramp_factor;
     // ======================== 小陀螺自稳前馈 (三参数模型) ========================
     // τ = b*ω + τ_f*sign(ω)
     // 所有参数均为物理量 (N·m), 最后统一乘NM_TO_GM6020_RAW转为CAN原始值
     float chassis_wz_rad = chassis_real_speed.chassis_imu_data.Gyro[2];  // rad/s
-    float chassis_wz_dps = chassis_wz_rad * RAD_2_DEGREE;               // °/s (用于SmoothSign)
-    float smooth_sign_val = SmoothSign(chassis_wz_dps, YAW_COULOMB_DEADZONE);
-    float viscous_torque = YAW_VISCOUS_DAMPING * chassis_wz_rad;  // N·m
-    float friction_torque = YAW_FRICTION_TORQUE * smooth_sign_val;  // N·m
-    float yaw_total_torque = viscous_torque + friction_torque;  // N·m
-    yaw_current_feedforward = yaw_acc_current + yaw_total_torque * NM_TO_GM6020_RAW;
+    float yaw_motion_tau_c_scale = YawTauCScale(yaw_ref_speed_rad, YAW_MOTION_STRIBECK_VS_RAD);
+    float yaw_motion_tau_s_scale = YawTauSScale(yaw_ref_speed_rad, YAW_MOTION_STRIBECK_VS_RAD);
+    float yaw_tau_c_scale = YawTauCScale(chassis_wz_rad, YAW_STRIBECK_VS_RAD);
+    float yaw_tau_s_scale = YawTauSScale(chassis_wz_rad, YAW_STRIBECK_VS_RAD);
+
+    yaw_motion_current_feedforward =
+        (
+            SelectByDirection(yaw_ref_speed_rad, YAW_MOTION_BIAS_FF_RAW_POS, YAW_MOTION_BIAS_FF_RAW_NEG) +
+            SelectByDirection(yaw_ref_speed_rad, YAW_ACC_FF_COEF_RAW_POS, YAW_ACC_FF_COEF_RAW_NEG) * yaw_ref_acc_rad +
+            SelectByDirection(yaw_ref_speed_rad, YAW_MOTION_W_FF_COEF_RAW_POS, YAW_MOTION_W_FF_COEF_RAW_NEG) * yaw_ref_speed_rad +
+            SelectByDirection(yaw_ref_speed_rad, YAW_MOTION_FRICTION_C_FF_RAW_POS, YAW_MOTION_FRICTION_C_FF_RAW_NEG) * yaw_motion_tau_c_scale +
+            SelectByDirection(yaw_ref_speed_rad, YAW_MOTION_FRICTION_S_FF_RAW_POS, YAW_MOTION_FRICTION_S_FF_RAW_NEG) * yaw_motion_tau_s_scale
+        ) * feedforward_ramp_factor;
+    yaw_spin_current_feedforward =
+        SelectByDirection(chassis_wz_rad, YAW_BIAS_FF_RAW_POS, YAW_BIAS_FF_RAW_NEG) +
+        SelectByDirection(chassis_wz_rad, YAW_WZ_FF_COEF_RAW_POS, YAW_WZ_FF_COEF_RAW_NEG) * chassis_wz_rad +
+        SelectByDirection(chassis_wz_rad, YAW_FRICTION_C_FF_RAW_POS, YAW_FRICTION_C_FF_RAW_NEG) * yaw_tau_c_scale +
+        SelectByDirection(chassis_wz_rad, YAW_FRICTION_S_FF_RAW_POS, YAW_FRICTION_S_FF_RAW_NEG) * yaw_tau_s_scale;
+    yaw_current_feedforward = yaw_motion_current_feedforward + yaw_spin_current_feedforward;
     
     // 使用IMU的Pitch角度计算重力补偿: feedforward = MAX * cos(pitch_angle)
     float pitch_angle_rad = (gimba_IMU_data->Pitch - PITCH_HORIZONTAL_ANGLE) * DEGREE_2_RAD;
@@ -311,8 +382,13 @@ void GimbalTask()
     gimbal_feedback_data.gimbal_imu_data = *gimba_IMU_data;
     gimbal_feedback_data.yaw_motor_single_round_angle = yaw_motor->measure.angle_single_round;
     
-    // CH0:yaw角度  CH1:yaw角速度(rad/s)  CH2:底盘wz(°/s)  CH3:yaw电流前馈  CH4:实际电流
-    VOFA(0, gimba_IMU_data->Yaw,gimba_IMU_data->Gyro[2],(float)yaw_motor->measure.real_current);
+    // 参数辨识分组输出: 每次只保留一行 VOFA，注释掉其余两行
+    // 1) yaw运动前馈辨识: CH0~CH6
+    VOFA(0, gimba_IMU_data->YawTotalAngle, gimba_IMU_data->Gyro[2], gimbal_wz_acc_filtered, yaw_ref_speed_rad, yaw_ref_acc_rad, yaw_motion_current_feedforward, (float)yaw_motor->measure.real_current);
+    // 2) yaw小陀螺补偿辨识: CH0~CH5
+    //VOFA(0, gimba_IMU_data->YawTotalAngle, chassis_real_speed.chassis_imu_data.Gyro[2], chassis_wz_acc_filtered, yaw_spin_current_feedforward, (float)yaw_motor->measure.real_current, yaw_current_feedforward);
+    // 3) pitch前馈辨识: CH0~CH6
+    //VOFA(0, gimba_IMU_data->Pitch, gimba_IMU_data->Gyro[1], pitch_w_acc_filtered, pitch_speed_rad, pitch_acc_rad, pitch_current_feedforward, (float)pitch_motor->measure.real_current);
     // 推送消息
     PubPushMessage(gimbal_pub, (void *)&gimbal_feedback_data);
 }

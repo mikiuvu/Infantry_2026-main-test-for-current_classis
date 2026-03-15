@@ -20,6 +20,7 @@
 #include "message_center.h"
 #include "general_def.h"
 #include "dji_motor.h"
+#include <math.h>
 
 // 私有宏,自动将编码器转换成角度值
 #define YAW_ALIGN_ANGLE (YAW_CHASSIS_ALIGN_ECD * ECD_ANGLE_COEF_DJI) // 对齐时的角度,0-360
@@ -76,12 +77,98 @@ static float yaw_ident_center_yaw;
 static float yaw_ident_hold_pitch;
 static float yaw_ident_start_ms;
 static uint32_t yaw_ident_round_trip_count;
+static float pitch_ident_center_yaw;
+static float pitch_ident_center_pitch;
+
+#if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
+static uint8_t vision_interp_initialized;
+static float vision_interp_start_yaw;
+static float vision_interp_target_yaw;
+static float vision_interp_start_pitch;
+static float vision_interp_target_pitch;
+static float vision_interp_start_ms;
+static uint8_t vision_interp_pitch_valid;
+static uint8_t vision_interp_last_tracking;
+#endif
 
 uint8_t remote_flag = 0;  // 遥控器类型选择: 0=未选择, 1=DJI遥控(键鼠), 2=图传遥控
 uint8_t stop_flag = 0;    // 急停锁存: 0=运行, 1=急停 (key_stop上升沿切换)
 uint8_t spin_flag = 0;    // 图传右侧按键自旋锁存: 0=关闭, 1=开启
 
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
+static float GetVisionInterpValue(float start, float target, float now_ms)
+{
+    float duration_ms = VISION_INTERP_DURATION_MS;
+    float progress;
+
+    if (duration_ms <= 1e-3f)
+        return target;
+
+    progress = (now_ms - vision_interp_start_ms) / duration_ms;
+    progress = loop_float_constrain(progress, 0.0f, 1.0f);
+    return start + (target - start) * progress;
+}
+
+static void GetVisionInterpolatedAim(float *yaw, float *pitch, uint8_t *pitch_valid)
+{
+    float now_ms = DWT_GetTimeline_ms();
+
+    if (!vision_interp_initialized)
+    {
+        *yaw = vision_recv_cache.aimYaw;
+        *pitch = vision_recv_cache.aimPitch;
+        *pitch_valid = (fabsf(vision_recv_cache.aimPitch) > 1e-3f);
+        return;
+    }
+
+    *yaw = GetVisionInterpValue(vision_interp_start_yaw, vision_interp_target_yaw, now_ms);
+    *pitch = GetVisionInterpValue(vision_interp_start_pitch, vision_interp_target_pitch, now_ms);
+    *pitch_valid = vision_interp_pitch_valid;
+}
+
+static void UpdateVisionInterpolation(void)
+{
+    float now_ms = DWT_GetTimeline_ms();
+    float current_yaw;
+    float current_pitch;
+    uint8_t tracking_valid = (vision_recv_cache.tracking != NO_TARGET);
+    uint8_t pitch_valid = (fabsf(vision_recv_cache.aimPitch) > 1e-3f);
+    uint8_t target_changed;
+
+    if (!vision_interp_initialized)
+    {
+        vision_interp_initialized = 1;
+        vision_interp_start_yaw = vision_recv_cache.aimYaw;
+        vision_interp_target_yaw = vision_recv_cache.aimYaw;
+        vision_interp_start_pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
+        vision_interp_target_pitch = pitch_valid ? vision_recv_cache.aimPitch : gimbal_fetch_data.gimbal_imu_data.Pitch;
+        vision_interp_start_ms = now_ms;
+        vision_interp_pitch_valid = pitch_valid;
+        vision_interp_last_tracking = tracking_valid;
+        return;
+    }
+
+    current_yaw = GetVisionInterpValue(vision_interp_start_yaw, vision_interp_target_yaw, now_ms);
+    current_pitch = GetVisionInterpValue(vision_interp_start_pitch, vision_interp_target_pitch, now_ms);
+
+    target_changed =
+        (fabsf(vision_recv_cache.aimYaw - vision_interp_target_yaw) > VISION_INTERP_EPSILON_DEG) ||
+        (pitch_valid && fabsf(vision_recv_cache.aimPitch - vision_interp_target_pitch) > VISION_INTERP_EPSILON_DEG) ||
+        (vision_interp_pitch_valid != pitch_valid) ||
+        (vision_interp_last_tracking != tracking_valid);
+
+    if (!target_changed)
+        return;
+
+    vision_interp_start_yaw = current_yaw;
+    vision_interp_target_yaw = vision_recv_cache.aimYaw;
+    vision_interp_start_pitch = current_pitch;
+    vision_interp_target_pitch = pitch_valid ? vision_recv_cache.aimPitch : current_pitch;
+    vision_interp_start_ms = now_ms;
+    vision_interp_pitch_valid = pitch_valid;
+    vision_interp_last_tracking = tracking_valid;
+}
+
 static void RefreshVisionRecvCache(void)
 {
     uint32_t irq_state = __get_PRIMASK();
@@ -91,6 +178,17 @@ static void RefreshVisionRecvCache(void)
     __set_PRIMASK(irq_state);
 
     vision_recv_cache.aimYaw = loop_float_constrain(vision_recv_cache.aimYaw, -180.0f, 180.0f);
+}
+
+static Bullet_Speed_e GetVisionBulletSpeedFlag(float bullet_speed)
+{
+    if (bullet_speed >= 24.0f)
+        return SMALL_AMU_30;
+    if (bullet_speed >= 17.0f)
+        return SMALL_AMU_18;
+    if (bullet_speed >= 12.0f)
+        return SMALL_AMU_15;
+    return BULLET_SPEED_NONE;
 }
 #endif
 
@@ -136,70 +234,160 @@ static void ResetYawIdentificationMode(void)
     yaw_ident_active = 0;
 }
 
-static float Clamp01(float value)
+static float ClampYawIdentSpeed(float speed_dps)
 {
-    if (value < 0.0f)
+    if (speed_dps < 0.0f)
         return 0.0f;
-    if (value > 1.0f)
-        return 1.0f;
-    return value;
+    if (speed_dps > YAW_IDENT_MAX_SPEED_DPS)
+        return YAW_IDENT_MAX_SPEED_DPS;
+    return speed_dps;
 }
 
-static float CalcYawIdentTravel01(float progress)
+static float ClampPitchIdentSpeed(float speed_dps)
 {
-    float high_speed_ratio = YAW_IDENT_HIGH_SPEED_RATIO;
-    float ramp_ratio;
-    float max_speed;
-    float ramp_progress;
-
-    progress = Clamp01(progress);
-
-    if (high_speed_ratio < 0.0f)
-        high_speed_ratio = 0.0f;
-    if (high_speed_ratio > 0.8f)
-        high_speed_ratio = 0.8f;
-
-    ramp_ratio = 0.5f * (1.0f - high_speed_ratio);
-    if (ramp_ratio < 0.05f)
-        ramp_ratio = 0.05f;
-
-    max_speed = 1.0f / (1.0f - ramp_ratio);
-
-    if (progress < ramp_ratio)
-    {
-        return 0.5f * max_speed * progress * progress / ramp_ratio;
-    }
-
-    if (progress < 1.0f - ramp_ratio)
-    {
-        return 0.5f * max_speed * ramp_ratio + max_speed * (progress - ramp_ratio);
-    }
-
-    ramp_progress = progress - (1.0f - ramp_ratio);
-    return 1.0f - 0.5f * max_speed * (ramp_ratio - ramp_progress) * (ramp_ratio - ramp_progress) / ramp_ratio;
+    if (speed_dps < 0.0f)
+        return 0.0f;
+    if (speed_dps > PITCH_IDENT_MAX_SPEED_DPS)
+        return PITCH_IDENT_MAX_SPEED_DPS;
+    return speed_dps;
 }
 
-static float CalcYawIdentWavePosition(float phase)
+static float ClampSpinIdentSpeed(float speed_dps)
 {
-    uint32_t quarter_index = (uint32_t)(phase * 4.0f);
-    float quarter_progress = phase * 4.0f - (float)quarter_index;
-    float travel = CalcYawIdentTravel01(quarter_progress);
+    if (speed_dps < 0.0f)
+        return 0.0f;
+    if (speed_dps > SPIN_IDENT_MAX_SPEED_DPS)
+        return SPIN_IDENT_MAX_SPEED_DPS;
+    return speed_dps;
+}
 
-    switch (quarter_index & 0x3u)
-    {
-    case 0:
-        return travel;
-    case 1:
-        return 1.0f - travel;
-    case 2:
-        return -travel;
-    default:
-        return travel - 1.0f;
-    }
+static float CalcYawIdentTargetOffset(float elapsed_ms, float speed_dps)
+{
+    float hold_ms = YAW_IDENT_HOLD_MS;
+    float platform_ms = YAW_IDENT_PLATFORM_MS;
+    float cycle_ms = 4.0f * hold_ms + 4.0f * platform_ms;
+    float phase_ms = elapsed_ms;
+    float amplitude_deg = speed_dps * platform_ms / 1000.0f;
+
+    while (phase_ms >= cycle_ms)
+        phase_ms -= cycle_ms;
+
+    if (phase_ms < hold_ms)
+        return 0.0f;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return speed_dps * phase_ms / 1000.0f;
+    phase_ms -= platform_ms;
+
+    if (phase_ms < hold_ms)
+        return amplitude_deg;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < 2.0f * platform_ms)
+        return amplitude_deg - speed_dps * phase_ms / 1000.0f;
+    phase_ms -= 2.0f * platform_ms;
+
+    if (phase_ms < hold_ms)
+        return -amplitude_deg;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return -amplitude_deg + speed_dps * phase_ms / 1000.0f;
+
+    return 0.0f;
+}
+
+static float CalcPitchIdentTargetOffset(float elapsed_ms, float speed_dps)
+{
+    float hold_ms = PITCH_IDENT_HOLD_MS;
+    float platform_ms = PITCH_IDENT_PLATFORM_MS;
+    float cycle_ms = 4.0f * hold_ms + 4.0f * platform_ms;
+    float phase_ms = elapsed_ms;
+    float amplitude_deg = speed_dps * platform_ms / 1000.0f;
+
+    while (phase_ms >= cycle_ms)
+        phase_ms -= cycle_ms;
+
+    if (phase_ms < hold_ms)
+        return 0.0f;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return speed_dps * phase_ms / 1000.0f;
+    phase_ms -= platform_ms;
+
+    if (phase_ms < hold_ms)
+        return amplitude_deg;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < 2.0f * platform_ms)
+        return amplitude_deg - speed_dps * phase_ms / 1000.0f;
+    phase_ms -= 2.0f * platform_ms;
+
+    if (phase_ms < hold_ms)
+        return -amplitude_deg;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return -amplitude_deg + speed_dps * phase_ms / 1000.0f;
+
+    return 0.0f;
+}
+
+static float CalcSpinIdentTargetWz(float elapsed_ms, float speed_dps)
+{
+    float hold_ms = SPIN_IDENT_HOLD_MS;
+    float platform_ms = SPIN_IDENT_PLATFORM_MS;
+    float cycle_ms = 4.0f * hold_ms + 4.0f * platform_ms;
+    float phase_ms = elapsed_ms;
+
+    while (phase_ms >= cycle_ms)
+        phase_ms -= cycle_ms;
+
+    if (phase_ms < hold_ms)
+        return 0.0f;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return speed_dps;
+    phase_ms -= platform_ms;
+
+    if (phase_ms < hold_ms)
+        return speed_dps;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return 0.0f;
+    phase_ms -= platform_ms;
+
+    if (phase_ms < hold_ms)
+        return 0.0f;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return -speed_dps;
+    phase_ms -= platform_ms;
+
+    if (phase_ms < hold_ms)
+        return -speed_dps;
+    phase_ms -= hold_ms;
+
+    if (phase_ms < platform_ms)
+        return 0.0f;
+
+    return 0.0f;
 }
 
 static void ApplyYawIdentificationMode(void)
 {
+    float elapsed_ms;
+    float speed_dps;
+    float hold_ms = YAW_IDENT_HOLD_MS;
+    float platform_ms = YAW_IDENT_PLATFORM_MS;
+    float cycle_ms = 4.0f * hold_ms + 4.0f * platform_ms;
+    float target_offset_deg;
+
     if (!yaw_ident_active)
     {
         yaw_ident_active = 1;
@@ -209,18 +397,11 @@ static void ApplyYawIdentificationMode(void)
         yaw_ident_round_trip_count = 0;
     }
 
-    float elapsed_ms = DWT_GetTimeline_ms() - yaw_ident_start_ms;
-    uint32_t round_trip_count = (uint32_t)(elapsed_ms / YAW_IDENT_PERIOD_MS);
-    float cycle_elapsed_ms = elapsed_ms - round_trip_count * YAW_IDENT_PERIOD_MS;
-    float cycle_phase = cycle_elapsed_ms / YAW_IDENT_PERIOD_MS;
-    float amplitude = YAW_IDENT_START_AMPLITUDE_DEG + round_trip_count * YAW_IDENT_AMPLITUDE_STEP_DEG;
-    float wave_position;
-
-    yaw_ident_round_trip_count = round_trip_count;
-    if (amplitude > YAW_IDENT_MAX_AMPLITUDE_DEG)
-        amplitude = YAW_IDENT_MAX_AMPLITUDE_DEG;
-
-    wave_position = CalcYawIdentWavePosition(cycle_phase);
+    elapsed_ms = DWT_GetTimeline_ms() - yaw_ident_start_ms;
+    yaw_ident_round_trip_count = (uint32_t)(elapsed_ms / cycle_ms);
+    speed_dps = YAW_IDENT_START_SPEED_DPS + yaw_ident_round_trip_count * YAW_IDENT_SPEED_STEP_DPS;
+    speed_dps = ClampYawIdentSpeed(speed_dps);
+    target_offset_deg = CalcYawIdentTargetOffset(elapsed_ms, speed_dps);
 
     chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
     chassis_cmd_send.vx = 0.0f;
@@ -230,7 +411,124 @@ static void ApplyYawIdentificationMode(void)
     chassis_cmd_send.aim_mode = AIM_OFF;
 
     gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
-    gimbal_cmd_send.yaw = yaw_ident_center_yaw + amplitude * wave_position;
+    gimbal_cmd_send.yaw = yaw_ident_center_yaw + target_offset_deg;
+    gimbal_cmd_send.pitch = yaw_ident_hold_pitch;
+
+    shoot_cmd_send.shoot_mode = SHOOT_OFF;
+    shoot_cmd_send.friction_mode = FRICTION_OFF;
+    shoot_cmd_send.load_mode = LOAD_STOP;
+}
+
+static void ApplyPitchIdentificationMode(void)
+{
+    float elapsed_ms;
+    float speed_dps;
+    float hold_ms = PITCH_IDENT_HOLD_MS;
+    float platform_ms = PITCH_IDENT_PLATFORM_MS;
+    float cycle_ms = 4.0f * hold_ms + 4.0f * platform_ms;
+    float target_offset_deg;
+
+    if (!yaw_ident_active)
+    {
+        yaw_ident_active = 1;
+        pitch_ident_center_yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
+        pitch_ident_center_pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
+        yaw_ident_start_ms = DWT_GetTimeline_ms();
+        yaw_ident_round_trip_count = 0;
+    }
+
+    elapsed_ms = DWT_GetTimeline_ms() - yaw_ident_start_ms;
+    yaw_ident_round_trip_count = (uint32_t)(elapsed_ms / cycle_ms);
+    speed_dps = PITCH_IDENT_START_SPEED_DPS + yaw_ident_round_trip_count * PITCH_IDENT_SPEED_STEP_DPS;
+    speed_dps = ClampPitchIdentSpeed(speed_dps);
+    target_offset_deg = CalcPitchIdentTargetOffset(elapsed_ms, speed_dps);
+
+    chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+    chassis_cmd_send.vx = 0.0f;
+    chassis_cmd_send.vy = 0.0f;
+    chassis_cmd_send.wz = 0.0f;
+    chassis_cmd_send.dash_mode = DASH_OFF;
+    chassis_cmd_send.aim_mode = AIM_OFF;
+
+    gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+    gimbal_cmd_send.yaw = pitch_ident_center_yaw;
+    gimbal_cmd_send.pitch = pitch_ident_center_pitch + target_offset_deg;
+
+    shoot_cmd_send.shoot_mode = SHOOT_OFF;
+    shoot_cmd_send.friction_mode = FRICTION_OFF;
+    shoot_cmd_send.load_mode = LOAD_STOP;
+}
+
+static void ApplySpinIdentificationMode(void)
+{
+    float elapsed_ms;
+    float speed_dps;
+    float hold_ms = SPIN_IDENT_HOLD_MS;
+    float platform_ms = SPIN_IDENT_PLATFORM_MS;
+    float cycle_ms = 4.0f * hold_ms + 4.0f * platform_ms;
+    float target_wz_dps;
+
+    if (!yaw_ident_active)
+    {
+        yaw_ident_active = 1;
+        yaw_ident_center_yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
+        yaw_ident_hold_pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
+        yaw_ident_start_ms = DWT_GetTimeline_ms();
+        yaw_ident_round_trip_count = 0;
+    }
+
+    elapsed_ms = DWT_GetTimeline_ms() - yaw_ident_start_ms;
+    yaw_ident_round_trip_count = (uint32_t)(elapsed_ms / cycle_ms);
+    speed_dps = SPIN_IDENT_START_SPEED_DPS + yaw_ident_round_trip_count * SPIN_IDENT_SPEED_STEP_DPS;
+    speed_dps = ClampSpinIdentSpeed(speed_dps);
+    target_wz_dps = CalcSpinIdentTargetWz(elapsed_ms, speed_dps);
+
+    chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
+    chassis_cmd_send.vx = 0.0f;
+    chassis_cmd_send.vy = 0.0f;
+    chassis_cmd_send.wz = target_wz_dps;
+    chassis_cmd_send.dash_mode = DASH_OFF;
+    chassis_cmd_send.aim_mode = AIM_OFF;
+
+    gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+    gimbal_cmd_send.yaw = yaw_ident_center_yaw;
+    gimbal_cmd_send.pitch = yaw_ident_hold_pitch;
+
+    shoot_cmd_send.shoot_mode = SHOOT_OFF;
+    shoot_cmd_send.friction_mode = FRICTION_OFF;
+    shoot_cmd_send.load_mode = LOAD_STOP;
+}
+
+static void ApplyYawSineIdentificationMode(void)
+{
+    float elapsed_ms;
+    float sample_time_ms;
+    float target_offset_deg;
+
+    if (!yaw_ident_active)
+    {
+        yaw_ident_active = 1;
+        yaw_ident_center_yaw = gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
+        yaw_ident_hold_pitch = gimbal_fetch_data.gimbal_imu_data.Pitch;
+        yaw_ident_start_ms = DWT_GetTimeline_ms();
+        yaw_ident_round_trip_count = 0;
+    }
+
+    elapsed_ms = DWT_GetTimeline_ms() - yaw_ident_start_ms;
+    sample_time_ms = floorf(elapsed_ms / YAW_SINE_IDENT_UPDATE_MS) * YAW_SINE_IDENT_UPDATE_MS;
+    target_offset_deg =
+        YAW_SINE_IDENT_AMPLITUDE_DEG *
+        sinf(2.0f * 3.1415926f * YAW_SINE_IDENT_FREQ_HZ * sample_time_ms / 1000.0f);
+
+    chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+    chassis_cmd_send.vx = 0.0f;
+    chassis_cmd_send.vy = 0.0f;
+    chassis_cmd_send.wz = 0.0f;
+    chassis_cmd_send.dash_mode = DASH_OFF;
+    chassis_cmd_send.aim_mode = AIM_OFF;
+
+    gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+    gimbal_cmd_send.yaw = yaw_ident_center_yaw + target_offset_deg;
     gimbal_cmd_send.pitch = yaw_ident_hold_pitch;
 
     shoot_cmd_send.shoot_mode = SHOOT_OFF;
@@ -283,7 +581,7 @@ static void Limitshoot()
     //     shoot_cmd_send.shoot_rate = 5;
     //     break;
     // }
-    shoot_cmd_send.shoot_rate = 15;
+    shoot_cmd_send.shoot_rate = 20;
 }
 #endif // DEBUG
 
@@ -408,14 +706,20 @@ static void RemoteControlSet()
     // 控制底盘和云台运行模式,云台待添加,云台是否始终使用IMU数据?
     if (switch_is_down(rc_data[TEMP].rc.switch_right)) // 右侧开关状态[下],进入小陀螺模式
     {
-#if YAW_IDENT_MODE_ENABLE
+#if IDENT_MODE_ENABLE == IDENT_MODE_YAW
         ApplyYawIdentificationMode();
-        return;
+#elif IDENT_MODE_ENABLE == IDENT_MODE_PITCH
+        ApplyPitchIdentificationMode();
+#elif IDENT_MODE_ENABLE == IDENT_MODE_SPIN
+        ApplySpinIdentificationMode();
+#elif IDENT_MODE_ENABLE == IDENT_MODE_YAW_SINE
+        ApplyYawSineIdentificationMode();
 #else
         ResetYawIdentificationMode();
         chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
 #endif
+        return;
     }
     else if (switch_is_mid(rc_data[TEMP].rc.switch_right)) // 右侧开关状态[中],底盘和云台分离,底盘保持不转动
     {
@@ -449,10 +753,18 @@ static void RemoteControlSet()
         // ======================== 根据协议类型获取视觉数据 ========================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
         // VCP/UART协议
-    yaw_diff = vision_recv_cache.aimYaw - gimbal_cmd_send.yaw;
-        yaw_diff = loop_float_constrain(yaw_diff, -45.0f, 45.0f); 
+    {
+        float interp_yaw;
+        float interp_pitch;
+        uint8_t interp_pitch_valid;
+
+        GetVisionInterpolatedAim(&interp_yaw, &interp_pitch, &interp_pitch_valid);
+        yaw_diff = interp_yaw - gimbal_cmd_send.yaw;
+        yaw_diff = loop_float_constrain(yaw_diff, -45.0f, 45.0f);
         gimbal_cmd_send.yaw += yaw_diff;
-    gimbal_cmd_send.pitch = vision_recv_cache.aimPitch;
+        if (interp_pitch_valid)
+            gimbal_cmd_send.pitch = interp_pitch;
+    }
         // 视觉模式下遥控器微调 (二段灵敏度, 方便快速更换目标)  
         //VisionRockerAdjust();
 #elif defined(VISION_USE_SERIALPORT)
@@ -703,8 +1015,16 @@ static void ImageMouseKeySet()
         {
             // 视觉自瞄
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-            gimbal_cmd_send.yaw += loop_float_constrain(vision_recv_cache.aimYaw - gimbal_cmd_send.yaw, -45, 45);
-            gimbal_cmd_send.pitch = (vision_recv_cache.aimPitch == 0 ? gimbal_cmd_send.pitch : vision_recv_cache.aimPitch);
+            {
+                float interp_yaw;
+                float interp_pitch;
+                uint8_t interp_pitch_valid;
+
+                GetVisionInterpolatedAim(&interp_yaw, &interp_pitch, &interp_pitch_valid);
+                gimbal_cmd_send.yaw += loop_float_constrain(interp_yaw - gimbal_cmd_send.yaw, -45, 45);
+                if (interp_pitch_valid)
+                    gimbal_cmd_send.pitch = interp_pitch;
+            }
 #elif defined(VISION_USE_SERIALPORT)
             if (vision_recv_data_sp->yaw != 0 || vision_recv_data_sp->pitch != 0) {
                 float aim_yaw = (float)vision_recv_data_sp->yaw / 100.0f;
@@ -792,7 +1112,7 @@ static void ImageMouseKeySet()
         break;
     }
 
-    if (chassis_cmd_send.dash_mode == DASH_ON && chassis_cmd_send.chassis_mode != CHASSIS_ROTATE)
+    if (chassis_cmd_send.dash_mode == DASH_ON)
     {
         chassis_speed_buff *= CHASSIS_TRANSLATE_DASH_RATIO;
     }
@@ -835,13 +1155,14 @@ void RobotCMDTask()
 
     // 从其他应用获取回传数据
 #ifdef GIMBAL_BOARD
-    // chassis_fetch_data = *(Chassis_Upload_Data_s *)CANCommGet(cmd_can_comm);
+    chassis_fetch_data = *(Chassis_Upload_Data_s *)CANCommGet(cmd_can_comm);
 #endif // GIMBAL_BOARD
     SubGetMessage(shoot_feed_sub, &shoot_fetch_data);
     SubGetMessage(gimbal_feed_sub, &gimbal_fetch_data);
     CalcOffsetAngle();
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     RefreshVisionRecvCache();
+    UpdateVisionInterpolation();
 #endif
 
     // ======== 控制源选择: 图传优先, 两者都离线则失能 ========
@@ -920,12 +1241,12 @@ void RobotCMDTask()
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     // VCP/UART协议 - 设置标志位和姿态角度
     const Vision_Send_s *vision_send_data = VisionGetSendData();
-    VisionSetFlag(chassis_fetch_data.self_color, vision_work_mode, chassis_fetch_data.bullet_speed);
+    VisionSetFlag(chassis_fetch_data.self_color, vision_work_mode, GetVisionBulletSpeedFlag(chassis_fetch_data.bullet_speed));
     VisionSetAltitude(loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f), 
                       gimbal_fetch_data.gimbal_imu_data.Pitch, 
                       gimbal_fetch_data.gimbal_imu_data.Roll);
-        //VOFA(0, vision_recv_cache.aimYaw, vision_recv_cache.aimPitch,
-        //vision_send_data->robotYaw, vision_send_data->robotPitch, vision_recv_cache.tracking);
+    //VOFA(0, vision_recv_cache.aimYaw, vision_recv_cache.aimPitch,
+    //vision_send_data->robotYaw, vision_send_data->robotPitch, vision_recv_cache.tracking);
 #elif defined(VISION_USE_SERIALPORT)
     // SerialPort协议 - 准备发送数据
     vision_send_data_sp.startflag = '!';
