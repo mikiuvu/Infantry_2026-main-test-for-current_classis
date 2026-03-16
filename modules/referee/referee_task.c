@@ -20,6 +20,7 @@ uint8_t UI_Seq;                               // 包序号，供整个referee文
 int StartAngle, EndAngle;                // 圆弧绘制用的起始角度和终止角度
 static uint8_t ui_initialized = 0;
 static ui_mode_e last_ui_mode = UI_KEEP;
+static Graph_Data_t UI_box;
 
 /**
  * @brief  判断各种ID，选择客户端ID
@@ -92,9 +93,9 @@ void My_UI_init()
     UIDelete(&referee_recv_info->referee_id, UI_Data_Del_ALL, 0); // 清空UI
     
     // 绘制瞄准准圈
-    Circle_Draw(&UI_aim_circle[0], "SCs",UI_Graph_ADD ,0,UI_Color_Yellow, 3,960,540,40); //小圈
-    Circle_Draw(&UI_aim_circle[1], "SCm",UI_Graph_ADD ,0,UI_Color_Green, 3,960,540,360); //大圈
-    UI_ReFresh(&referee_recv_info->referee_id, 2, UI_aim_circle[0], UI_aim_circle[1]);
+    // Circle_Draw(&UI_aim_circle[0], "SCs",UI_Graph_ADD ,0,UI_Color_Yellow, 3,960,540,40); //小圈
+    // Circle_Draw(&UI_aim_circle[1], "SCm",UI_Graph_ADD ,0,UI_Color_Green, 3,960,540,360); //大圈
+    // UI_ReFresh(&referee_recv_info->referee_id, 2, UI_aim_circle[0], UI_aim_circle[1]);
 
     // 绘制基准线
     Line_Draw(&UI_shoot_line[0], "sl0", UI_Graph_ADD, 0, UI_Color_Purplish_red, 3, 560, 540, 1360, 540); // 横向基准线
@@ -106,6 +107,9 @@ void My_UI_init()
     Arc_Draw(&UI_position_line[1], "sd5", UI_Graph_ADD, 8, UI_Color_Main, 270, 90, 3, 1695, 470, 40, 40);
     UI_ReFresh(&referee_recv_info->referee_id, 2, UI_position_line[0], UI_position_line[1]);
 
+    //绘制自瞄范围框
+    Rectangle_Draw(&UI_box, "bx0", UI_Graph_ADD, 0, UI_Color_Green, 3, 800, 400, 1120, 680);
+    UI_ReFresh(&referee_recv_info->referee_id, 1, UI_box);
 
     /**
     Line_Draw(&UI_shoot_line[4], "sl4", UI_Graph_ADD, 7, UI_Color_Main, 2, 930, shoot_line_location[4], 960, shoot_line_location[4]);
@@ -125,7 +129,7 @@ void My_UI_init()
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_sta[0]);
     Char_Draw(&UI_State_sta[1], "ss1", UI_Graph_ADD, 8, UI_Color_Main, 15, 3, 50, 700, "FRICTION:");
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_sta[1]);
-    Char_Draw(&UI_State_sta[2], "ss2", UI_Graph_ADD, 8, UI_Color_Main, 15, 3, 50, 650, "COVER:");
+    Char_Draw(&UI_State_sta[2], "ss2", UI_Graph_ADD, 8, UI_Color_Main, 15, 3, 50, 650, "FIRE:");
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_sta[2]);
     Char_Draw(&UI_State_sta[3], "ss3", UI_Graph_ADD, 8, UI_Color_Main, 15, 3, 50, 600, "ROTATE:");
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_sta[3]);
@@ -136,14 +140,14 @@ void My_UI_init()
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[0]);
     Char_Draw(&UI_State_dyn[1], "sd1", UI_Graph_ADD, 8, UI_Color_Pink, 15, 2, 185, 700, "OFF");
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[1]);
-    Char_Draw(&UI_State_dyn[2], "sd2", UI_Graph_ADD, 8, UI_Color_Pink, 15, 2, 185, 650, "open ");
+    Char_Draw(&UI_State_dyn[2], "sd2", UI_Graph_ADD, 8, UI_Color_Green, 15, 2, 185, 650, "ON ");
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[2]);
     Char_Draw(&UI_State_dyn[3], "sd3", UI_Graph_ADD, 8, UI_Color_Pink, 15, 2, 185, 600, "OFF");
     Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[3]);
 
 
     // 能量条框
-    Rectangle_Draw(&UI_Energy[0], "se0", UI_Graph_ADD, 0, UI_Color_Pink, 7, 752, 81, 1138, 111);
+    Rectangle_Draw(&UI_Energy[0], "se0", UI_Graph_ADD, 0, UI_Color_Pink, 7, 752, 81, 1165, 111);
     UI_ReFresh(&referee_recv_info->referee_id, 1, UI_Energy[0]);
 
 
@@ -194,6 +198,22 @@ static void My_UI_Refresh(referee_info_t *referee_recv_info, Referee_Interactive
         }
         Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[1]);
         _Interactive_data->Referee_Interactive_Flag.friction_flag = 0;
+    }
+
+    if (_Interactive_data->Referee_Interactive_Flag.fire_flag == 1)
+    {
+        switch (_Interactive_data->fire_mode)
+        {
+        case FIRE_OFF:
+            Char_Draw(&UI_State_dyn[2], "sd2", UI_Graph_Change, 8, UI_Color_Pink, 15, 2, 185, 650, "OFF");
+            break;
+        case FIRE_ON:
+        default:
+            Char_Draw(&UI_State_dyn[2], "sd2", UI_Graph_Change, 8, UI_Color_Green, 15, 2, 185, 650, "ON ");
+            break;
+        }
+        Char_ReFresh(&referee_recv_info->referee_id, UI_State_dyn[2]);
+        _Interactive_data->Referee_Interactive_Flag.fire_flag = 0;
     }
 
     if (_Interactive_data->Referee_Interactive_Flag.chassis_flag == 1)
@@ -287,5 +307,11 @@ static void Mode_Change_Check(Referee_Interactive_info_t *_Interactive_data)
     {
         _Interactive_data->Referee_Interactive_Flag.tracking_flag = 1;
         _Interactive_data->last_aim_mode = _Interactive_data->aim_mode;
+    }
+
+    if (_Interactive_data->fire_mode != _Interactive_data->last_fire_mode)
+    {
+        _Interactive_data->Referee_Interactive_Flag.fire_flag = 1;
+        _Interactive_data->last_fire_mode = _Interactive_data->fire_mode;
     }
 }

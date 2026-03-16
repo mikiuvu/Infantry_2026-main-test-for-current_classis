@@ -61,9 +61,9 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD 5526  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
+#define YAW_CHASSIS_ALIGN_ECD 1383  //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改
 //#define YAW_CHASSIS_ALIGN_ECD 2030  //步兵二
-#define YAW_ECD_GREATER_THAN_4096 1 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
+#define YAW_ECD_GREATER_THAN_4096 0 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
 #define PITCH_MAX_ANGLE 0 //云台竖直方向最大角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度) 
 #define PITCH_MIN_ANGLE 0 //云台竖直方向最小角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度)
@@ -105,13 +105,14 @@
 #define SPIN_IDENT_HOLD_MS             300.0f   // 每段之间保持时间(ms)
 
 // 拨盘堵转检测与反转参数
-#define BLOCK_DETECT_THRESHOLD 0.60f   // 堵转判定误差阈值(误差/目标值)
+#define BLOCK_DETECT_THRESHOLD 0.70f   // 堵转判定误差阈值(误差/目标值)
 #define BLOCK_DETECT_COUNT 15         // 堵转判定次数
 #define BLOCK_SPEED_THRESHOLD  18000.0f  // 拨盘堵转辅助判定: 低转速阈值 (degree/s, 电机转子)
 #define BLOCK_CURRENT_THRESHOLD 6000   // 拨盘堵转辅助判定: 高反馈电流阈值 (DJI原始反馈值)
 #define BLOCK_TIME_RECORD_COUNT 20     // 记录堵转时间戳的计数阈值，不建议修改 20
 #define REVERSE_DURATION_MS 80          // 反转持续时间(ms)
 #define REVERSE_ANGLE_RATIO 0.8f       // 反转角度系数，不建议修改 1.0
+#define SHOOT_FRICTION_SOFT_STOP_MS 600.0f // 摩擦轮关闭时先速度闭环到0再停机的时间(ms)
 
 // 发射参数
 #define ONE_BULLET_DELTA_ANGLE 36   // 发射一发弹丸拨盘转动的距离,由机械设计图纸给出
@@ -301,6 +302,11 @@ typedef enum
     UI_KEEP,
     UI_REFRESH,
 } ui_mode_e;
+typedef enum
+{
+    FIRE_OFF = 0,
+    FIRE_ON,
+} fire_mode_e;
 // 功率限制,从裁判系统获取,是否有必要保留?
 typedef struct
 { // 功率控制
@@ -350,6 +356,7 @@ typedef struct
     SuperCap_Mode_e super_cap;
     float pitch_angle;
     aim_mode_e aim_mode;
+    fire_mode_e fire_mode;
 
 } Chassis_Ctrl_Cmd_s;
 

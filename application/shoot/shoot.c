@@ -86,9 +86,13 @@ static Shoot_Ctrl_Cmd_s shoot_cmd_recv; // 来自gimbal_cmd的发射控制信息
 static Subscriber_t *shoot_sub;
 static Shoot_Upload_Data_s shoot_feedback_data; // 来自gimbal_cmd的发射控制信息
 
-// 拨弹盘前馈
+// 摩擦轮弹速闭环
 static float last_bullet_speed_feedback = 0.0f;
 static float friction_ref = SHOOT_FRICTION_BASE_REF;
+static friction_mode_e last_friction_mode = FRICTION_OFF;
+static uint8_t friction_soft_stopping = 0;
+static float friction_soft_stop_start_ms = 0.0f;
+// 拨弹盘前馈
 static float loader_current_forward = 0;
 
 // dwt定时
@@ -243,7 +247,7 @@ void ShootInit()
                 .Kd = 0,
                 .Improve = PID_Integral_Limit,
                 .IntegralLimit = 5000,
-                .MaxOut = 10000,
+                .MaxOut = 10000, //10000
             },
             .current_feedforward_ptr = &loader_current_forward,
         },
@@ -278,7 +282,8 @@ void ShootTask()
 {
     // 电机离线报警: loader=3声, friction_l=4声, friction_r=5声
     MotorOfflineAlarmTask(shoot_offline_alarm);
-    //VOFA(0,loader->measure.angle_single_round,loader->measure.speed_aps,loader->measure.real_current,shoot_cmd_recv.load_mode == LOAD_REVERSE);
+    VOFA(0,loader->measure.angle_single_round,loader->measure.speed_aps,loader->measure.real_current,shoot_cmd_recv.load_mode == LOAD_REVERSE);
+    //VOFA(0,friction_l->measure.speed_aps, friction_r->measure.speed_aps, loader->measure.angle_single_round);
     // 从 cmd获取控制数据
     SubGetMessage(shoot_sub, &shoot_cmd_recv);
     // 对shoot mode等于SHOOT_STOP的情况特殊处理,直接停止所有电机(紧急停止)
@@ -289,30 +294,58 @@ void ShootTask()
         DJIMotorStop(loader);
         friction_ref = SHOOT_FRICTION_BASE_REF;
         last_bullet_speed_feedback = 0.0f;
+        friction_soft_stopping = 0;
+        last_friction_mode = FRICTION_OFF;
     }
     else // 恢复运行
     {
-        DJIMotorEnable(friction_l);
-        DJIMotorEnable(friction_r);
-        DJIMotorEnable(loader);
+         DJIMotorEnable(friction_l);
+         DJIMotorEnable(friction_r);
+         DJIMotorEnable(loader);
+        // DJIMotorStop(friction_l);
+        // DJIMotorStop(friction_r);
+        // DJIMotorStop(loader);
     }
     if (shoot_cmd_recv.friction_mode == FRICTION_ON)
     {
+        friction_soft_stopping = 0;
+        DJIMotorEnable(friction_l);
+        DJIMotorEnable(friction_r);
         UpdateFrictionRefByBulletSpeed(shoot_cmd_recv.bullet_speed);
         DJIMotorOuterLoop(friction_l, SPEED_LOOP);
         DJIMotorOuterLoop(friction_r, SPEED_LOOP);
         DJIMotorSetRef(friction_l, friction_ref);
         DJIMotorSetRef(friction_r, friction_ref);
+
     }
     else // 关闭摩擦轮
     {
-        DJIMotorOuterLoop(friction_l, OPEN_LOOP);
-        DJIMotorOuterLoop(friction_r, OPEN_LOOP);
-        DJIMotorSetRef(friction_l, 0);
-        DJIMotorSetRef(friction_r, 0);
+        if (last_friction_mode == FRICTION_ON && !friction_soft_stopping)
+        {
+            friction_soft_stopping = 1;
+            friction_soft_stop_start_ms = DWT_GetTimeline_ms();
+        }
+
+        if (friction_soft_stopping &&
+            (DWT_GetTimeline_ms() - friction_soft_stop_start_ms) < SHOOT_FRICTION_SOFT_STOP_MS)
+        {
+            DJIMotorEnable(friction_l);
+            DJIMotorEnable(friction_r);
+            DJIMotorOuterLoop(friction_l, SPEED_LOOP);
+            DJIMotorOuterLoop(friction_r, SPEED_LOOP);
+            DJIMotorSetRef(friction_l, 0);
+            DJIMotorSetRef(friction_r, 0);
+        }
+        else
+        {
+            friction_soft_stopping = 0;
+            DJIMotorStop(friction_l);
+            DJIMotorStop(friction_r);
+        }
         friction_ref = SHOOT_FRICTION_BASE_REF;
         last_bullet_speed_feedback = 0.0f;
     }
+    last_friction_mode = shoot_cmd_recv.friction_mode;
     // 如果上一次触发单发或3发指令的时间加上不应期仍然大于当前时间(尚未休眠完毕),直接返回即可
     // 单发模式主要提供给能量机关激活使用(以及英雄的射击大部分处于单发)
     if (hibernate_time + dead_time > DWT_GetTimeline_ms())

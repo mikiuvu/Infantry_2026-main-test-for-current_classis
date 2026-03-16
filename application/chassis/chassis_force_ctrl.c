@@ -608,6 +608,7 @@ feedback:
     ui_data.Pitch_angle   = -chassis_cmd_recv.pitch_angle;
     ui_data.offset_angle  = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode      = chassis_cmd_recv.aim_mode;
+    ui_data.fire_mode     = chassis_cmd_recv.fire_mode;
     ui_data.capEnergy     = cap->cap_msg.capEnergy;
 
 #ifdef FORCE_CONTROL_CHASSIS_BOARD

@@ -255,10 +255,7 @@ void VisionSend();
  *                  - VISION_MODE_AIM: 自瞄模式
  *                  - VISION_MODE_SMALL_BUFF: 小能量机关模式
  *                  - VISION_MODE_BIG_BUFF: 大能量机关模式
- * @param bullet_speed 当前弹丸速度(用于弹道解算)
- *                     - 步兵: SMALL_AMU_15 或 SMALL_AMU_18
- *                     - 英雄: BIG_AMU_16
- *                     - 哨兵: SMALL_AMU_30
+ * @param bullet_speed 当前弹丸速度(m/s, 用于弹道解算)
  * 
  * @note 此函数会将参数保存到Vision_Send_s结构体中,
  *       在调用VisionSend()时一起发送给上位机
@@ -272,9 +269,9 @@ void VisionSend();
  *       // 根据裁判系统设置敌方颜色
  *       Detect_Color_e enemy_color = (referee_data->self_color == COLOR_RED) 
  *                                     ? COLOR_BLUE : COLOR_RED;
- *       VisionSetFlag(enemy_color, VISION_MODE_AIM, SMALL_AMU_15);
+ *       VisionSetFlag(enemy_color, VISION_MODE_AIM, 18.0f);
  */
-void VisionSetFlag(Detect_Color_e Detect_color, Work_Mode_e work_mode, Bullet_Speed_e bullet_speed);
+void VisionSetFlag(Detect_Color_e Detect_color, Work_Mode_e work_mode, float bullet_speed);
 
 /**
  * @brief 设置机器人当前姿态角度

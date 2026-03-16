@@ -57,6 +57,7 @@ typedef struct
 	uint32_t shoot_flag : 1;
 	uint32_t friction_flag : 1;
 	uint32_t tracking_flag : 1;
+	uint32_t fire_flag : 1;
 } Referee_Interactive_Flag_t;
 
 // 此结构体包含UI绘制与机器人车间通信的需要的其他非裁判系统数据
@@ -72,6 +73,7 @@ typedef struct
 	uint8_t capEnergy;   					 // 超电能量
 	float Pitch_angle;
 	aim_mode_e aim_mode;
+	fire_mode_e fire_mode;
 	
 	// 上一次的模式，用于flag判断
 	chassis_mode_e chassis_last_mode;			
@@ -80,6 +82,7 @@ typedef struct
 	Chassis_Power_Data_s Chassis_last_Power_Data;
 	float Pitch_last_angle;
 	aim_mode_e last_aim_mode;
+	fire_mode_e last_fire_mode;
 
 	float offset_angle;
 } Referee_Interactive_info_t;

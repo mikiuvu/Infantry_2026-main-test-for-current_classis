@@ -180,7 +180,7 @@ void StartINSTASK(void const *argument)
     // 1kHz
     INS_Task();
     
-    if (cnt % 4 == 0)
+    if (cnt % 5   == 0)
     {
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
       VisionSend(); // VCP/UART协议发送视觉数据

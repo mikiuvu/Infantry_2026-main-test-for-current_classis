@@ -556,10 +556,10 @@ struct CapTxMsg
 static float chassis_powerlimit = 0;
 
 // 控制量突变检测参数
-#define CMD_BURST_VX_THRESHOLD   500.0f   // vx突变阈值
-#define CMD_BURST_VY_THRESHOLD   500.0f   // vy突变阈值
-#define CMD_BURST_WZ_THRESHOLD   200.0f   // wz突变阈值
-#define CMD_BURST_DURATION       700     // 突变功率提升持续时间 (1000*2ms=2s)
+#define CMD_BURST_VX_THRESHOLD   1000.0f   // vx突变阈值
+#define CMD_BURST_VY_THRESHOLD   1000.0f   // vy突变阈值
+#define CMD_BURST_WZ_THRESHOLD   2000.0f   // wz突变阈值
+#define CMD_BURST_DURATION       500     // 突变功率提升持续时间 (1000*2ms=2s)
 #define CMD_BURST_POWER_BOOST    50.0f    // 突变功率提升量 (W)
 
 static void LimitChassisOutput()
@@ -616,7 +616,7 @@ static void LimitChassisOutput()
         rotate_speed_buff = pos_variable_rotate_speed[GetRandomInt(0, 7)];
     }
     
-    rotate_speed_buff = 1.5;
+    //rotate_speed_buff = 1.5;
 
     // 混合控制模式: 设置目标速度，前馈已在GlobalObserverCalculate中更新
     // 电机模块会自动使用速度环+电流前馈
@@ -839,7 +839,7 @@ void ChassisTask()
 #ifdef CHASSIS_BOARD
     chassis_cmd_recv = *(Chassis_Ctrl_Cmd_s *)CANCommGet(chasiss_can_comm);
 #endif // CHASSIS_BOARD
-
+    //chassis_cmd_recv.chassis_mode = CHASSIS_ROTATE;
     if (chassis_cmd_recv.chassis_mode == CHASSIS_ZERO_FORCE)
     { // 如果出现重要模块离线或遥控器设置为急停,让电机停止
         DJIMotorStop(motor_lf);
@@ -916,6 +916,7 @@ void ChassisTask()
     ui_data.Pitch_angle = -chassis_cmd_recv.pitch_angle;
     ui_data.offset_angle = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode = chassis_cmd_recv.aim_mode;
+    ui_data.fire_mode = chassis_cmd_recv.fire_mode;
     ui_data.capEnergy = cap->cap_msg.capEnergy; 
     
     VOFA(0,vt_lf, vt_rf, vt_lb, vt_rb, 

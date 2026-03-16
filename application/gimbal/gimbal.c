@@ -384,7 +384,7 @@ void GimbalTask()
     
     // 参数辨识分组输出: 每次只保留一行 VOFA，注释掉其余两行
     // 1) yaw运动前馈辨识: CH0~CH6
-    VOFA(0, gimba_IMU_data->YawTotalAngle, gimba_IMU_data->Gyro[2], gimbal_wz_acc_filtered, yaw_ref_speed_rad, yaw_ref_acc_rad, yaw_motion_current_feedforward, (float)yaw_motor->measure.real_current);
+    //VOFA(0, gimba_IMU_data->YawTotalAngle, gimba_IMU_data->Gyro[2], gimbal_wz_acc_filtered, yaw_ref_speed_rad, yaw_ref_acc_rad, yaw_motion_current_feedforward, (float)yaw_motor->measure.real_current);
     // 2) yaw小陀螺补偿辨识: CH0~CH5
     //VOFA(0, gimba_IMU_data->YawTotalAngle, chassis_real_speed.chassis_imu_data.Gyro[2], chassis_wz_acc_filtered, yaw_spin_current_feedforward, (float)yaw_motor->measure.real_current, yaw_current_feedforward);
     // 3) pitch前馈辨识: CH0~CH6

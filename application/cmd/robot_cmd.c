@@ -79,6 +79,7 @@ static float yaw_ident_start_ms;
 static uint32_t yaw_ident_round_trip_count;
 static float pitch_ident_center_yaw;
 static float pitch_ident_center_pitch;
+static fire_mode_e vision_fire_mode = FIRE_ON;
 
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
 static uint8_t vision_interp_initialized;
@@ -189,6 +190,15 @@ static Bullet_Speed_e GetVisionBulletSpeedFlag(float bullet_speed)
     if (bullet_speed >= 12.0f)
         return SMALL_AMU_15;
     return BULLET_SPEED_NONE;
+}
+
+static Detect_Color_e GetEnemyDetectColor(Detect_Color_e self_color)
+{
+    if (self_color == COLOR_RED)
+        return COLOR_BLUE;
+    if (self_color == COLOR_BLUE)
+        return COLOR_RED;
+    return COLOR_NONE;
 }
 #endif
 
@@ -627,6 +637,7 @@ void RobotCMDInit()
     gimbal_cmd_send.yaw = 0;
     gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
     chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
+    chassis_cmd_send.fire_mode = FIRE_ON;
     shoot_cmd_send.shoot_mode = SHOOT_OFF;
     shoot_cmd_send.friction_mode = FRICTION_OFF;
     shoot_cmd_send.load_mode = LOAD_STOP;
@@ -668,6 +679,7 @@ static void CalcOffsetAngle()
 static void RemoteControlSet()
 {
     chassis_cmd_send.chassis_power_buff = 1;
+    chassis_cmd_send.fire_mode = vision_fire_mode;
     shoot_cmd_send.shoot_mode = SHOOT_ON;
     
 #ifdef CHASSIS_ONLY
@@ -873,11 +885,11 @@ static void RemoteControlSet()
         // 只有跟踪和开火标志位都为1时才开启摩擦轮，并允许通过拨轮控制拨弹盘
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
         // VCP/UART协议: 视觉fire=1且未手动拨弹时自动开火
-    if (vision_recv_cache.fire == 1 && shoot_cmd_send.load_mode == LOAD_STOP)
+    if (vision_fire_mode == FIRE_ON && vision_recv_cache.fire == 1 && shoot_cmd_send.load_mode == LOAD_STOP)
             shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
 #elif defined(VISION_USE_SERIALPORT)
         // SerialPort协议: 使用shootStatus字段 (非0=跟踪且开火, 0=停火)
-        if (vision_recv_data_sp->shootStatus != 0)
+        if (vision_fire_mode == FIRE_ON && vision_recv_data_sp->shootStatus != 0)
         {
             shoot_cmd_send.friction_mode = FRICTION_ON;
             if (rc_data[TEMP].rc.dial < -300)
@@ -894,7 +906,7 @@ static void RemoteControlSet()
         }
 #elif defined(VISION_USE_SP)
         // SP协议: mode==2 表示控制云台且开火
-        if (vision_recv_sp->mode == 2)
+        if (vision_fire_mode == FIRE_ON && vision_recv_sp->mode == 2)
         {
             shoot_cmd_send.friction_mode = FRICTION_ON;
             if (rc_data[TEMP].rc.dial < -300)
@@ -981,6 +993,7 @@ static void ImageMouseKeySet()
 
     Limitshoot();
     chassis_speed_buff = CHASSIS_TRANSLATE_BASE_SPEED;
+    chassis_cmd_send.fire_mode = vision_fire_mode;
     chassis_cmd_send.chassis_power_buff = 1;
     shoot_cmd_send.shoot_mode = SHOOT_ON;
     gimbal_cmd_send.gimbal_mode = GIMBAL_FREE_MODE;
@@ -1002,6 +1015,13 @@ static void ImageMouseKeySet()
     {
         chassis_cmd_send.ui_mode = UI_KEEP;
     }
+
+    switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_G] % 2)
+    {
+    case 0:  vision_fire_mode = FIRE_ON;  break;
+    default: vision_fire_mode = FIRE_OFF; break;
+    }
+    chassis_cmd_send.fire_mode = vision_fire_mode;
 
     // 鼠标右键 + 视觉tracking=1 → 自瞄; 否则鼠标控制
     {
@@ -1069,12 +1089,12 @@ static void ImageMouseKeySet()
     if (image_rc_data[TEMP].mouse.press_r)
     {
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
-        if (vision_recv_cache.fire == 1)
+        if (vision_fire_mode == FIRE_ON && vision_recv_cache.fire == 1)
             shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
         else if (!image_rc_data[TEMP].mouse.press_l)
             shoot_cmd_send.load_mode = LOAD_STOP;
 #elif defined(VISION_USE_SERIALPORT)
-        if (vision_recv_data_sp->shootStatus != 0)
+        if (vision_fire_mode == FIRE_ON && vision_recv_data_sp->shootStatus != 0)
             shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
         else if (!image_rc_data[TEMP].mouse.press_l)
             shoot_cmd_send.load_mode = LOAD_STOP;
@@ -1236,12 +1256,13 @@ void RobotCMDTask()
     }
 
     shoot_cmd_send.bullet_speed = chassis_fetch_data.bullet_speed;
+    Detect_Color_e enemy_color = GetEnemyDetectColor(chassis_fetch_data.self_color);
     
     // ======================== 视觉发送数据准备 - 根据协议类型 ====== ==================
 #if defined(VISION_USE_VCP) || defined(VISION_USE_UART)
     // VCP/UART协议 - 设置标志位和姿态角度
     const Vision_Send_s *vision_send_data = VisionGetSendData();
-    VisionSetFlag(chassis_fetch_data.self_color, vision_work_mode, chassis_fetch_data.bullet_speed);
+    VisionSetFlag(enemy_color, vision_work_mode, chassis_fetch_data.bullet_speed);
     VisionSetAltitude(loop_float_constrain(gimbal_fetch_data.gimbal_imu_data.YawTotalAngle, -180.0f, 180.0f), 
                       gimbal_fetch_data.gimbal_imu_data.Pitch, 
                       gimbal_fetch_data.gimbal_imu_data.Roll);
@@ -1258,7 +1279,7 @@ void RobotCMDTask()
     vision_send_data_sp.roll = (int16_t)(gimbal_fetch_data.gimbal_imu_data.Roll * 100.0f);
     
     // 颜色: 0=蓝色, 1=红色
-    vision_send_data_sp.color = chassis_fetch_data.self_color;
+    vision_send_data_sp.color = enemy_color;
     
     // 时间戳
     vision_send_data_sp.time_stamp = DWT_GetTimeline_ms();
