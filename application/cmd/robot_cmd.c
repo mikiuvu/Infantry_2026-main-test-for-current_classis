@@ -678,7 +678,6 @@ static void CalcOffsetAngle()
  */
 static void RemoteControlSet()
 {
-    chassis_cmd_send.chassis_power_buff = 1;
     chassis_cmd_send.fire_mode = vision_fire_mode;
     shoot_cmd_send.shoot_mode = SHOOT_ON;
     
@@ -994,7 +993,6 @@ static void ImageMouseKeySet()
     Limitshoot();
     chassis_speed_buff = CHASSIS_TRANSLATE_BASE_SPEED;
     chassis_cmd_send.fire_mode = vision_fire_mode;
-    chassis_cmd_send.chassis_power_buff = 1;
     shoot_cmd_send.shoot_mode = SHOOT_ON;
     gimbal_cmd_send.gimbal_mode = GIMBAL_FREE_MODE;
 
