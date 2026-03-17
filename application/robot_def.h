@@ -61,8 +61,8 @@
 /* 机器人重要参数定义,注意根据不同机器人进行修改,浮点数需要以.0或f结尾,无符号以u结尾 */
 // 云台参数
 #define YAW_ALIGN_ECD         0 //0    //云台和底盘对齐指向相同方向时的yaw的差值,需要测量
-#define YAW_CHASSIS_ALIGN_ECD   //步兵一  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改 
-//#define YAW_CHASSIS_ALIGN_ECD 1383  //步兵二
+//#define YAW_CHASSIS_ALIGN_ECD 5526  //步兵正  // 云台和底盘对齐指向相同方向时的电机编码器值,若对云台有机械改动需要修改 
+#define YAW_CHASSIS_ALIGN_ECD 1383  //步兵反
 #define YAW_ECD_GREATER_THAN_4096 0 // ALIGN_ECD值是否大于4096,是为1,否为0;用于计算云台偏转角度
 #define PITCH_HORIZON_ECD 3625       // 云台处于水平位置时编码器值,若对云台有机械改动需要修改
 #define PITCH_MAX_ANGLE 0 //云台竖直方向最大角度 (注意反馈如果是陀螺仪，则填写陀螺仪的角度) 
@@ -134,20 +134,20 @@
 #define CHASSIS_IMU_OFFSET_Y     4.1f   // IMU相对底盘中心的Y偏移 (mm), 正值表示IMU在左
 
 #define CHASSIS_POWER_LIMIT 100 // 
-/* ======================== 底盘平动参数 ======================== */
+/* ======================== 底盘平动参数 ======================== */    
 #define CHASSIS_TRANSLATE_BASE_SPEED  40000.0f  // 键鼠模式基础平动速度 (degree/s)
-#define CHASSIS_TRANSLATE_DASH_RATIO  2.0f     // 按住Shift时的平动加速倍率
+#define CHASSIS_TRANSLATE_DASH_RATIO  5.0f     // 按住Shift时的平动加速倍率
 
 /* ======================== 底盘自旋参数 ======================== */
 #define CHASSIS_ROTATE_BASE_WZ       5000.0f  // 小陀螺基础自旋速度 (degree/s)
 #define CHASSIS_ROTATE_DASH_RATIO    0.5f    // 键鼠模式按住Shift时的小陀螺倍率
 
 /* ======================== 发射弹速闭环参数 ======================== */
-#define SHOOT_BULLET_SPEED_TARGET      24.0f     // 目标弹速 (m/s)
-#define SHOOT_FRICTION_BASE_REF        40000.0f  // 摩擦轮基础目标转速
-#define SHOOT_FRICTION_REF_MIN         35000.0f  // 摩擦轮闭环最小目标转速
-#define SHOOT_FRICTION_REF_MAX         43000.0f  // 摩擦轮闭环最大目标转速
-#define SHOOT_FRICTION_SPEED_KP        300.0f   // 每次有效弹速反馈的增量校正系数
+#define SHOOT_BULLET_SPEED_TARGET      22.0f     // 目标弹速 (m/s)
+#define SHOOT_FRICTION_BASE_REF        35000.0f  // 摩擦轮基础目标转速
+#define SHOOT_FRICTION_REF_MIN         16000.0f  // 摩擦轮闭环最小目标转速
+#define SHOOT_FRICTION_REF_MAX         39000.0f  // 摩擦轮闭环最大目标转速
+#define SHOOT_FRICTION_SPEED_KP        600.0f   // 每次有效弹速反馈的增量校正系数
 #define SHOOT_BULLET_SPEED_DEADBAND    0.2f      // 弹速控制死区
 
 /* ======================== IMU安装方向校正 ======================== */
@@ -389,18 +389,11 @@ typedef struct
 /* @todo : 对于平衡底盘,需要新增控制模式和控制数据 */
 typedef struct
 {
-#if defined(CHASSIS_BOARD) || defined(GIMBAL_BOARD) // 非单板的时候底盘还将imu数据回传(若有必要)
-    attitude_t chassis_imu_data;
-#endif
-    // 底盘真实速度 (用于速度融合和打滑检测), 单位: mm/s (轮子线速度)
-     float real_vx;
-     float real_vy;
-     float real_wz;  // 单位: degree/s
+    float chassis_wz_imu;        // 底盘IMU的Gyro[2], unit: rad/s
 
     uint8_t rest_heat;           // 剩余枪口热量
     float bullet_speed;          // 实时弹速
     Detect_Color_e self_color;   // 0 for blue, 1 for red
-    uint8_t robot_level;
 
 } Chassis_Upload_Data_s;
 

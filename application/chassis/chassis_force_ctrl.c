@@ -39,6 +39,9 @@ static CANCommInstance *chassis_can_comm;
 #endif
 static Chassis_Ctrl_Cmd_s chassis_cmd_recv;
 static Chassis_Upload_Data_s chassis_feedback_data;
+static float chassis_real_vx_feedback = 0.0f;
+static float chassis_real_vy_feedback = 0.0f;
+static float chassis_real_wz_feedback = 0.0f;
 
 // IMU
 #include "ins_task.h"
@@ -214,9 +217,9 @@ static float _EstimateSpeed(void)
     float wheel_vx = (-wheel_speed[W_LF] + wheel_speed[W_RF] - wheel_speed[W_LB] + wheel_speed[W_RB]) / (2.0f * Sqrt2);
     float wheel_vy = (-wheel_speed[W_LF] - wheel_speed[W_RF] + wheel_speed[W_LB] + wheel_speed[W_RB]) / (2.0f * Sqrt2);
 
-    chassis_feedback_data.real_wz = (wheel_speed[W_LF] + wheel_speed[W_RF] 
-                                   + wheel_speed[W_LB] + wheel_speed[W_RB])
-                                    / (4.0f * L * DEGREE_2_RAD);
+    chassis_real_wz_feedback = (wheel_speed[W_LF] + wheel_speed[W_RF]
+                              + wheel_speed[W_LB] + wheel_speed[W_RB])
+                               / (4.0f * L * DEGREE_2_RAD);
 
     // DWT精确dt
     static uint32_t dwt_cnt = 0;
@@ -241,8 +244,8 @@ static float _EstimateSpeed(void)
     imu_accel_y -= ( alpha_yaw * imu_offset_x);
 
     // 卡尔曼融合
-    chassis_feedback_data.real_vx = SimpleKalman1D_Update(&kf_vx, imu_accel_x, wheel_vx, dt);
-    chassis_feedback_data.real_vy = SimpleKalman1D_Update(&kf_vy, imu_accel_y, wheel_vy, dt);
+    chassis_real_vx_feedback = SimpleKalman1D_Update(&kf_vx, imu_accel_x, wheel_vx, dt);
+    chassis_real_vy_feedback = SimpleKalman1D_Update(&kf_vy, imu_accel_y, wheel_vy, dt);
 
     // =============== 打滑检测 ===============
     float dv_x  = imu_accel_x * dt;
@@ -286,8 +289,8 @@ static float _EstimateSpeed(void)
     }
 
     // 调试
-    fc_debug.chassis_vx = chassis_feedback_data.real_vx;
-    fc_debug.chassis_vy = chassis_feedback_data.real_vy;
+    fc_debug.chassis_vx = chassis_real_vx_feedback;
+    fc_debug.chassis_vy = chassis_real_vy_feedback;
 
     return dt;
 }
@@ -596,9 +599,9 @@ void ChassisForceCtrlTask(void)
 
 feedback:
     // ---- 反馈数据 ----
+    chassis_feedback_data.chassis_wz_imu = Chassis_INS->Gyro[2];
     chassis_feedback_data.self_color  = referee_data->GameRobotState.robot_id > 7 ? COLOR_BLUE : COLOR_RED;
     chassis_feedback_data.rest_heat   = referee_data->PowerHeatData.shooter_heat0;
-    chassis_feedback_data.robot_level = referee_data->GameRobotState.robot_level;
     chassis_feedback_data.bullet_speed = referee_data->ShootData.bullet_speed;
 
     ui_data.chassis_mode  = chassis_cmd_recv.chassis_mode;
