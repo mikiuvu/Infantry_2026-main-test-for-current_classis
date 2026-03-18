@@ -601,7 +601,7 @@ feedback:
     // ---- 反馈数据 ----
     chassis_feedback_data.chassis_wz_imu = Chassis_INS->Gyro[2];
     chassis_feedback_data.self_color  = referee_data->GameRobotState.robot_id > 7 ? COLOR_BLUE : COLOR_RED;
-    chassis_feedback_data.rest_heat   = referee_data->PowerHeatData.shooter_heat0;
+    chassis_feedback_data.rest_heat   = referee_data->PowerHeatData.shooter_17mm_heat;
     chassis_feedback_data.bullet_speed = referee_data->ShootData.bullet_speed;
 
     ui_data.chassis_mode  = chassis_cmd_recv.chassis_mode;

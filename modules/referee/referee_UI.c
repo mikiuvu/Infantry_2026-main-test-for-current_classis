@@ -70,14 +70,14 @@ void Line_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Operate, u
 	graph->layer = Graph_Layer;
 	graph->color = Graph_Color;
 
-	graph->details_a = 0;
-	graph->details_b = 0;
+	graph->start_angle = 0;
+	graph->end_angle = 0;
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_c = 0;
-	graph->details_d = details_d;
-	graph->details_e = details_e;
+	graph->radius = 0;
+	graph->end_x = details_d;
+	graph->end_y = details_e;
 }
 
 /************************************************绘制矩形*************************************************
@@ -104,14 +104,14 @@ void Rectangle_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Opera
 	graph->layer = Graph_Layer;
 	graph->color = Graph_Color;
 
-	graph->details_a = 0;
-	graph->details_b = 0;
+	graph->start_angle = 0;
+	graph->end_angle = 0;
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_c = 0;
-	graph->details_d = details_d;
-	graph->details_e = details_e;
+	graph->radius = 0;
+	graph->end_x = details_d;
+	graph->end_y = details_e;
 }
 
 /************************************************绘制整圆*************************************************
@@ -138,14 +138,14 @@ void Circle_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Operate,
 	graph->layer = Graph_Layer;
 	graph->color = Graph_Color;
 
-	graph->details_a = 0;
-	graph->details_b = 0;
+	graph->start_angle = 0;
+	graph->end_angle = 0;
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_c = Graph_details_c;
-	graph->details_d = 0;
-	graph->details_e = 0;
+	graph->radius = Graph_details_c;
+	graph->end_x = 0;
+	graph->end_y = 0;
 }
 /************************************************绘制椭圆*************************************************
 **参数：*graph Graph_Data类型变量指针，用于存放图形数据
@@ -172,14 +172,14 @@ void Elliptical_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Oper
 	graph->color = Graph_Color;
 	graph->width = Graph_Width;
 
-	graph->details_a = 0;
-	graph->details_b = 0;
+	graph->start_angle = 0;
+	graph->end_angle = 0;
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_c = 0;
-	graph->details_d = details_d;
-	graph->details_e = details_e;
+	graph->radius = 0;
+	graph->end_x = details_d;
+	graph->end_y = details_e;
 }
 
 /************************************************绘制圆弧*************************************************
@@ -208,14 +208,14 @@ void Arc_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Operate, ui
 	graph->layer = Graph_Layer;
 	graph->color = Graph_Color;
 
-	graph->details_a = Graph_StartAngle;
-	graph->details_b = Graph_EndAngle;
+	graph->start_angle = Graph_StartAngle;
+	graph->end_angle = Graph_EndAngle;
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_c = 0;
-	graph->details_d = x_Length;
-	graph->details_e = y_Length;
+	graph->radius = 0;
+	graph->end_x = x_Length;
+	graph->end_y = y_Length;
 }
 
 /************************************************绘制浮点型数据*************************************************
@@ -250,12 +250,12 @@ void Float_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Operate, 
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_a = Graph_Size;
-	graph->details_b = Graph_Digit;
+	graph->start_angle = Graph_Size;
+	graph->end_angle = Graph_Digit;
 
-	graph->details_c = Graph_Float & 0x3FF;
-	graph->details_d = (Graph_Float >> 10) & 0x7FF;
-	graph->details_e = (Graph_Float >> 21) & 0x7FF;
+	graph->radius = Graph_Float & 0x3FF;
+	graph->end_x = (Graph_Float >> 10) & 0x7FF;
+	graph->end_y = (Graph_Float >> 21) & 0x7FF;
 }
 
 /************************************************绘制整型数据*************************************************
@@ -284,14 +284,14 @@ void Integer_Draw(Graph_Data_t *graph, char graphname[3], uint32_t Graph_Operate
 	graph->layer = Graph_Layer;
 	graph->color = Graph_Color;
 
-	graph->details_a = Graph_Size;
-	graph->details_b = 0;
+	graph->start_angle = Graph_Size;
+	graph->end_angle = 0;
 	graph->width = Graph_Width;
 	graph->start_x = Start_x;
 	graph->start_y = Start_y;
-	graph->details_c = Graph_Integer & 0x3FF;
-	graph->details_d = (Graph_Integer >> 10) & 0x7FF;
-	graph->details_e = (Graph_Integer >> 21) & 0x7FF;
+	graph->radius = Graph_Integer & 0x3FF;
+	graph->end_x = (Graph_Integer >> 10) & 0x7FF;
+	graph->end_y = (Graph_Integer >> 21) & 0x7FF;
 }
 
 /************************************************绘制字符型数据*************************************************
@@ -325,16 +325,16 @@ void Char_Draw(String_Data_t *graph, char graphname[3], uint32_t Graph_Operate, 
 	graph->Graph_Control.width = Graph_Width;
 	graph->Graph_Control.start_x = Start_x;
 	graph->Graph_Control.start_y = Start_y;
-	graph->Graph_Control.details_a = Graph_Size;
-	graph->Graph_Control.details_c = 0;
-	graph->Graph_Control.details_d = 0;
-	graph->Graph_Control.details_e = 0;
+	graph->Graph_Control.start_angle = Graph_Size;
+	graph->Graph_Control.radius = 0;
+	graph->Graph_Control.end_x = 0;
+	graph->Graph_Control.end_y = 0;
 
 	va_list ap;
 	va_start(ap, fmt);
 	vsprintf((char *)graph->show_Data, fmt, ap); // 使用参数列表进行格式化并输出到字符串
 	va_end(ap);
-	graph->Graph_Control.details_b = strlen((const char *)graph->show_Data);
+	graph->Graph_Control.end_angle = strlen((const char *)graph->show_Data);
 }
 
 /* UI推送函数（使更改生效）
