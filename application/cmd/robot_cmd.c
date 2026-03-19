@@ -788,6 +788,10 @@ static void RemoteControlSet()
 
         GetVisionInterpolatedAim(&interp_yaw, &interp_pitch, &interp_pitch_valid);
         yaw_diff = interp_yaw - gimbal_cmd_send.yaw;
+        if (yaw_diff > 180)  
+        yaw_diff -= 360;
+        if (yaw_diff < -180) 
+        yaw_diff += 360;
         yaw_diff = loop_float_constrain(yaw_diff, -45.0f, 45.0f);
         gimbal_cmd_send.yaw += yaw_diff;
         if (interp_pitch_valid)
@@ -1056,7 +1060,13 @@ static void ImageMouseKeySet()
                 uint8_t interp_pitch_valid;
 
                 GetVisionInterpolatedAim(&interp_yaw, &interp_pitch, &interp_pitch_valid);
-                gimbal_cmd_send.yaw += loop_float_constrain(interp_yaw - gimbal_cmd_send.yaw, -45, 45);
+                yaw_diff = interp_yaw - gimbal_cmd_send.yaw;
+                if (yaw_diff > 180)  
+                yaw_diff -= 360;
+                if (yaw_diff < -180) 
+                yaw_diff += 360;
+                yaw_diff = loop_float_constrain(yaw_diff, -45.0f, 45.0f);
+                gimbal_cmd_send.yaw += yaw_diff;
                 if (interp_pitch_valid)
                     gimbal_cmd_send.pitch = interp_pitch;
             }
@@ -1087,12 +1097,23 @@ static void ImageMouseKeySet()
         }
     }
 
-    // E键发射模式
+    // E键 Q键底盘模式
     switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_E] % 2)
     {
-    case 0:  shoot_cmd_send.load_mode = LOAD_BURSTFIRE; break;
-    default: shoot_cmd_send.load_mode = LOAD_3_BULLET; break;
+    case 0:      switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_Q] % 2)
+    {
+    case 0:  chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;         break;
+    default: chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;            break;
+    }; break;
+    default:     switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_Q] % 2)
+    {
+    case 0:  chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW; break;
+    default: chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;            break;
+    }; break;
     }
+
+
+
     // 鼠标左键射击
     switch (image_rc_data[TEMP].mouse.press_l)
     {
@@ -1127,12 +1148,6 @@ static void ImageMouseKeySet()
     case 0:  shoot_cmd_send.friction_mode = FRICTION_OFF; break;
     default: shoot_cmd_send.friction_mode = FRICTION_ON;  break;
     }
-    // Q键底盘模式
-    switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_Q] % 2)
-    {
-    case 0:  chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW; break;
-    default: chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;            break;
-    }
 
     // Shift超级电容
     switch (image_rc_data[TEMP].key[KEY_PRESS].shift)
@@ -1155,13 +1170,6 @@ static void ImageMouseKeySet()
     chassis_cmd_send.vy = image_rc_data[TEMP].key[KEY_PRESS].w * chassis_speed_buff - image_rc_data[TEMP].key[KEY_PRESS].s * chassis_speed_buff;
     chassis_cmd_send.vx = image_rc_data[TEMP].key[KEY_PRESS].a * chassis_speed_buff - image_rc_data[TEMP].key[KEY_PRESS].d * chassis_speed_buff;
 
-    // G键视觉目标
-    switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_G] % 3)
-    {
-    case 0:  vision_work_mode = VISION_MODE_AIM;        break;
-    case 1:  vision_work_mode = VISION_MODE_SMALL_BUFF; break;
-    default: vision_work_mode = VISION_MODE_BIG_BUFF;   break;
-    }
 
     if (shoot_cmd_send.friction_mode == FRICTION_OFF && shoot_cmd_send.load_mode != LOAD_REVERSE)
         shoot_cmd_send.load_mode = LOAD_STOP;
