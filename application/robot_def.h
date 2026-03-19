@@ -108,7 +108,7 @@
 #define BLOCK_DETECT_THRESHOLD 0.70f   // 堵转判定误差阈值(误差/目标值)
 #define BLOCK_DETECT_COUNT 15         // 堵转判定次数
 #define BLOCK_SPEED_THRESHOLD  18000.0f  // 拨盘堵转辅助判定: 低转速阈值 (degree/s, 电机转子)
-#define BLOCK_CURRENT_THRESHOLD 6000   // 拨盘堵转辅助判定: 高反馈电流阈值 (DJI原始反馈值)
+#define BLOCK_CURRENT_THRESHOLD 5000   // 拨盘堵转辅助判定: 高反馈电流阈值 (DJI原始反馈值)
 #define BLOCK_TIME_RECORD_COUNT 20     // 记录堵转时间戳的计数阈值，不建议修改 20
 #define REVERSE_DURATION_MS 80          // 反转持续时间(ms)
 #define REVERSE_ANGLE_RATIO 0.8f       // 反转角度系数，不建议修改 1.0
@@ -140,14 +140,14 @@
 
 /* ======================== 底盘自旋参数 ======================== */
 #define CHASSIS_ROTATE_BASE_WZ       5000.0f  // 小陀螺基础自旋速度 (degree/s)
-#define CHASSIS_ROTATE_DASH_RATIO    0.5f    // 键鼠模式按住Shift时的小陀螺倍率
+#define CHASSIS_ROTATE_DASH_RATIO    0.7f    // 键鼠模式按住Shift时的小陀螺倍率
 
 /* ======================== 发射弹速闭环参数 ======================== */
-#define SHOOT_BULLET_SPEED_TARGET      22.0f     // 目标弹速 (m/s)
-#define SHOOT_FRICTION_BASE_REF        35000.0f  // 摩擦轮基础目标转速
+#define SHOOT_BULLET_SPEED_TARGET      22.5f     // 目标弹速 (m/s)
+#define SHOOT_FRICTION_BASE_REF        37000.0f  // 摩擦轮基础目标转速
 #define SHOOT_FRICTION_REF_MIN         16000.0f  // 摩擦轮闭环最小目标转速
 #define SHOOT_FRICTION_REF_MAX         39000.0f  // 摩擦轮闭环最大目标转速
-#define SHOOT_FRICTION_SPEED_KP        600.0f   // 每次有效弹速反馈的增量校正系数
+#define SHOOT_FRICTION_SPEED_KP        100.0f   // 每次有效弹速反馈的增量校正系数
 #define SHOOT_BULLET_SPEED_DEADBAND    0.2f      // 弹速控制死区
 
 /* ======================== IMU安装方向校正 ======================== */
@@ -188,8 +188,8 @@
 /* ======================== 云台前馈参数 ======================== */
 // 前馈在gimbal中本地计算。yaw链路使用工程/raw域参数，直接输出GM6020电流原始值。
 // 速度前馈系数 (目标角速度 * 系数 = 速度前馈输出)
-#define YAW_SPEED_FF_COEF       0.9f     // yaw速度前馈系数
-#define PITCH_SPEED_FF_COEF     0.9f     // pitch速度前馈系数 
+#define YAW_SPEED_FF_COEF       1.0f     // yaw速度前馈系数
+#define PITCH_SPEED_FF_COEF     1.0f     // pitch速度前馈系数 
 // yaw目标运动前馈: 直接在raw域建模，使用参考角速度/角加速度，不依赖物理扭矩单位
 #define YAW_ACC_FF_COEF_RAW_POS           0.0f   // yaw正向目标运动加速度项 (GM6020 raw per rad/s²)
 #define YAW_MOTION_W_FF_COEF_RAW_POS      0.0f       // yaw正向目标运动粘滞项 (GM6020 raw per rad/s)
@@ -353,7 +353,7 @@ typedef struct
     friction_mode_e friction_mode;
     loader_mode_e load_mode;
     SuperCap_Mode_e super_cap;
-    float pitch_angle;
+    // float pitch_angle;
     aim_mode_e aim_mode;
     fire_mode_e fire_mode;
 
@@ -376,7 +376,7 @@ typedef struct
     loader_mode_e load_mode;
     friction_mode_e friction_mode;
     float bullet_speed; // 实时弹速反馈, unit: m/s
-    uint8_t rest_heat;
+    uint16_t rest_heat;
     float shoot_rate; // 连续发射的射频,unit per s,发/秒
 } Shoot_Ctrl_Cmd_s;
 
@@ -391,7 +391,7 @@ typedef struct
 {
     float chassis_wz_imu;        // 底盘IMU的Gyro[2], unit: rad/s
 
-    uint8_t rest_heat;           // 剩余枪口热量
+    uint16_t rest_heat;           // 剩余枪口热量
     float bullet_speed;          // 实时弹速
     Detect_Color_e self_color;   // 0 for blue, 1 for red
 
@@ -406,7 +406,7 @@ typedef struct
 
 typedef struct
 {
-    
+    uint16_t rest_heat;           // 剩余枪口热量
 } Shoot_Upload_Data_s;
 
 #pragma pack() // 开启字节对齐,结束前面的#pragma pack(1)

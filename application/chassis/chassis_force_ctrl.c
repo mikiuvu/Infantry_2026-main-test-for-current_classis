@@ -608,7 +608,7 @@ feedback:
     ui_data.friction_mode = chassis_cmd_recv.friction_mode;
     ui_data.shoot_mode    = chassis_cmd_recv.load_mode;
     ui_data.ui_mode       = chassis_cmd_recv.ui_mode;
-    ui_data.Pitch_angle   = -chassis_cmd_recv.pitch_angle;
+    // ui_data.Pitch_angle   = -chassis_cmd_recv.pitch_angle;
     ui_data.offset_angle  = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode      = chassis_cmd_recv.aim_mode;
     ui_data.fire_mode     = chassis_cmd_recv.fire_mode;

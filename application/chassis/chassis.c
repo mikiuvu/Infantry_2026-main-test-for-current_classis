@@ -913,14 +913,14 @@ void ChassisTask()
 #endif
     chassis_feedback_data.self_color = referee_data->GameRobotState.robot_id > 7 ? COLOR_BLUE : COLOR_RED;
     //当前只做了17mm热量的数据获取,后续根据robot_def中的宏切换双枪管和英雄42mm的情况
-    chassis_feedback_data.rest_heat = referee_data->PowerHeatData.shooter_17mm_heat;
+    chassis_feedback_data.rest_heat = referee_data->GameRobotState.shooter_cooling_rate * (referee_data->GameRobotState.shooter_cooling_limit - referee_data->PowerHeatData.shooter_17mm_heat);
     chassis_feedback_data.bullet_speed = referee_data->ShootData.bullet_speed;
     
     ui_data.chassis_mode = chassis_cmd_recv.chassis_mode;
     ui_data.friction_mode = chassis_cmd_recv.friction_mode;
     ui_data.shoot_mode = chassis_cmd_recv.load_mode;
     ui_data.ui_mode = chassis_cmd_recv.ui_mode;
-    ui_data.Pitch_angle = -chassis_cmd_recv.pitch_angle;
+    // ui_data.Pitch_angle = -chassis_cmd_recv.pitch_angle;
     ui_data.offset_angle = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode = chassis_cmd_recv.aim_mode;
     ui_data.fire_mode = chassis_cmd_recv.fire_mode;

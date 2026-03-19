@@ -16,8 +16,26 @@
 #include "bsp_log.h"
 #include "robot_def.h"
 #include "daemon.h"
+#include "math.h"
 
 #include "chassis.h"
+
+#define VISION_AIM_YAW_ABS_MAX_DEG   720.0f
+#define VISION_AIM_PITCH_ABS_MAX_DEG 180.0f
+
+static uint8_t VisionAimValueValid(float aim_yaw, float aim_pitch)
+{
+    if (!isfinite(aim_yaw) || !isfinite(aim_pitch))
+        return 0;
+
+    if (fabsf(aim_yaw) > VISION_AIM_YAW_ABS_MAX_DEG)
+        return 0;
+
+    if (fabsf(aim_pitch) > VISION_AIM_PITCH_ABS_MAX_DEG)
+        return 0;
+
+    return 1;
+}
 
 // ======================== 静态全局变量 ========================
 static Vision_Recv_s recv_data;              // 从视觉接收的数据(目标信息、控制指令等)
@@ -247,6 +265,7 @@ static void VisionOfflineCallback(void *id)
  */
 static void DecodeVision(uint16_t recv_len)
 {
+    Vision_Recv_s temp_recv;
     // 数据包有效性检查:
     // 1. 长度必须等于 Vision_Recv_s 结构体大小(12字节)
     // 2. 包头必须是 0xA5 (单字节检查)
@@ -256,7 +275,14 @@ static void DecodeVision(uint16_t recv_len)
     }
 
     // 验证通过,拷贝数据到接收结构体
-    memcpy(&recv_data, vis_recv_buff, sizeof(Vision_Recv_s));
+    memcpy(&temp_recv, vis_recv_buff, sizeof(Vision_Recv_s));
+
+    if (!VisionAimValueValid(temp_recv.aimYaw, temp_recv.aimPitch))
+    {
+        return;
+    }
+
+    recv_data = temp_recv;
     
     // 根据实际坐标系需要,可以在这里对接收到的角度取反
     
