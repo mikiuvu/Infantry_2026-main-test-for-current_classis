@@ -41,7 +41,7 @@
 #include "referee_task.h"
 #include "general_def.h"
 #include "bsp_dwt.h"
-#include "referee_UI.h"
+#include "ui_interface.h"
 #include "arm_math.h"
 #include "bsp_buzzer.h"
 

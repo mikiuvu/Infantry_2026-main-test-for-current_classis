@@ -72,6 +72,7 @@ typedef struct
 	Chassis_Power_Data_s Chassis_Power_Data; // 功率控制
 	uint8_t capEnergy;   					 // 超电能量
 	float Pitch_angle;
+	float supercap_now_power;
 	aim_mode_e aim_mode;
 	fire_mode_e fire_mode;
 	
@@ -80,6 +81,7 @@ typedef struct
 	loader_mode_e shoot_last_mode;		
 	friction_mode_e friction_last_mode; 
 	Chassis_Power_Data_s Chassis_last_Power_Data;
+	float supercap_last_power;
 	float Pitch_last_angle;
 	aim_mode_e last_aim_mode;
 	fire_mode_e last_fire_mode;

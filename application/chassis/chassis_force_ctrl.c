@@ -613,6 +613,7 @@ feedback:
     ui_data.aim_mode      = chassis_cmd_recv.aim_mode;
     ui_data.fire_mode     = chassis_cmd_recv.fire_mode;
     ui_data.capEnergy     = cap->cap_msg.capEnergy;
+    ui_data.supercap_now_power = cap->cap_msg.Now_Power;
 
 #ifdef FORCE_CONTROL_CHASSIS_BOARD
     CANCommSend(chassis_can_comm, (void *)&chassis_feedback_data);

@@ -148,7 +148,8 @@ modules/motor_offline_alarm/motor_offline_alarm.c \
 modules/oled/oled.c \
 modules/referee/crc_ref.c \
 modules/referee/rm_referee.c \
-modules/referee/referee_UI.c \
+modules/referee/ui_interface.c \
+modules/referee/ui_g.c \
 modules/referee/referee_task.c \
 modules/remote/remote_control.c \
 modules/remote/transfer_image.c \

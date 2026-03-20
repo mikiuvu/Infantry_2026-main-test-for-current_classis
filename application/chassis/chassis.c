@@ -924,7 +924,8 @@ void ChassisTask()
     ui_data.offset_angle = chassis_cmd_recv.offset_angle;
     ui_data.aim_mode = chassis_cmd_recv.aim_mode;
     ui_data.fire_mode = chassis_cmd_recv.fire_mode;
-    ui_data.capEnergy = cap->cap_msg.capEnergy; 
+    ui_data.capEnergy = cap->cap_msg.capEnergy;
+    ui_data.supercap_now_power = cap->cap_msg.Now_Power;
     
     VOFA(0,vt_lf, vt_rf, vt_lb, vt_rb, 
         motor_lb->measure.speed_aps,motor_lb->measure.real_current,
