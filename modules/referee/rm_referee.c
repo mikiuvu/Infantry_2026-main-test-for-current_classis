@@ -144,5 +144,5 @@ void RefereeSend(uint8_t *send, uint16_t tx_len)
 		xLastWakeTime = xTaskGetTickCount();
 		delay_initialized = 1;
 	}
-	vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(120));
+	vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(70));
 }

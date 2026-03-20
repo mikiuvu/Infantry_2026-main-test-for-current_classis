@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "rm_referee.h"
+#include "task.h"
 
 Graph_Data_t ui_g_now_figures[UI_G_TOTAL_FIGURE];
 uint8_t ui_g_dirty_figure[UI_G_TOTAL_FIGURE];
@@ -68,25 +69,22 @@ static void ui_g_set_names_and_change_mode(void)
 
 static void ui_g_build_static_objects(uint32_t graph_operate)
 {
-    Line_Draw(ui_g_LINE_CrossHorizontal, "sl0", graph_operate, 0, UI_Color_Purplish_red, 3, 560, 540, 1360, 540);
-    Line_Draw(ui_g_LINE_CrossVertical, "sl1", graph_operate, 0, UI_Color_Purplish_red, 3, 960, 140, 960, 940);
-    Rectangle_Draw(ui_g_RECT_ChassisBox, "sp0", graph_operate, 0, UI_Color_White, 3, 1650, 400, 1740, 540);
-    Arc_Draw(ui_g_ARC_ChassisYaw, "sd5", graph_operate, 8, UI_Color_Main, 270, 90, 3, 1695, 470, 40, 40);
+    // Line_Draw(ui_g_LINE_CrossHorizontal, "sl0", graph_operate, 0, UI_Color_Purplish_red, 3, 560, 540, 1360, 540);
+    // Line_Draw(ui_g_LINE_CrossVertical, "sl1", graph_operate, 0, UI_Color_Purplish_red, 3, 960, 140, 960, 940);
+    // Rectangle_Draw(ui_g_RECT_ChassisBox, "sp0", graph_operate, 0, UI_Color_White, 3, 1650, 400, 1740, 540);
+    // Arc_Draw(ui_g_ARC_ChassisYaw, "sd5", graph_operate, 8, UI_Color_Main, 270, 90, 3, 1695, 470, 40, 40);
     Rectangle_Draw(ui_g_RECT_AimBox, "bx0", graph_operate, 0, UI_Color_Green, 3, 800, 400, 1120, 680);
     Rectangle_Draw(ui_g_RECT_EnergyFrame, "se0", graph_operate, 0, UI_Color_Pink, 7, 752, 81, 1165, 111);
 
     Char_Draw(ui_g_TEXT_AimLabel, "ss0", graph_operate, 8, UI_Color_Main, 15, 3, 50, 750, "AUTO_AIM:");
     Char_Draw(ui_g_TEXT_FrictionLabel, "ss1", graph_operate, 8, UI_Color_Main, 15, 3, 50, 700, "FRICTION:");
     Char_Draw(ui_g_TEXT_FireLabel, "ss2", graph_operate, 8, UI_Color_Main, 15, 3, 50, 650, "FIRE:");
-    Char_Draw(ui_g_TEXT_RotateLabel, "ss3", graph_operate, 8, UI_Color_Main, 15, 3, 50, 600, "ROTATE:");
-    Char_Draw(ui_g_TEXT_HeadLabel, "ss4", graph_operate, 8, UI_Color_Main, 15, 3, 50, 550, "HEAD:");
+    // Char_Draw(ui_g_TEXT_RotateLabel, "ss3", graph_operate, 8, UI_Color_Main, 15, 3, 50, 600, "ROTATE:");
+    Char_Draw(ui_g_TEXT_HeadLabel, "ss4", graph_operate, 8, UI_Color_Main, 15, 3, 50, 600, "HEAD:");
 }
 
 static void ui_g_build_dynamic_objects(uint32_t graph_operate)
 {
-    int start_angle;
-    int end_angle;
-    float offset_angle = -ui_g_interactive_info->offset_angle;
 
     switch (ui_g_interactive_info->aim_mode)
     {
@@ -121,64 +119,49 @@ static void ui_g_build_dynamic_objects(uint32_t graph_operate)
         break;
     }
 
-    switch (ui_g_interactive_info->chassis_mode)
-    {
-    case CHASSIS_ROTATE:
-        Char_Draw(ui_g_TEXT_RotateState, "sd3", graph_operate, 8, UI_Color_Green, 15, 2, 185, 600, "ON ");
-        break;
-    default:
-        Char_Draw(ui_g_TEXT_RotateState, "sd3", graph_operate, 8, UI_Color_Pink, 15, 2, 185, 600, "OFF");
-        break;
-    }
+    // switch (ui_g_interactive_info->chassis_mode)
+    // {
+    // case CHASSIS_ROTATE:
+    //     Char_Draw(ui_g_TEXT_RotateState, "sd3", graph_operate, 8, UI_Color_Green, 15, 2, 185, 600, "ON ");
+    //     break;
+    // default:
+    //     Char_Draw(ui_g_TEXT_RotateState, "sd3", graph_operate, 8, UI_Color_Pink, 15, 2, 185, 600, "OFF");
+    //     break;
+    // }
 
     switch (ui_g_interactive_info->chassis_mode)
     {
     case CHASSIS_FOLLOW_GIMBAL_YAW:
-        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Green, 15, 2, 185, 550, "FOLLOW");
+        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Green, 15, 2, 185, 600, "FOLLOW");
         break;
     case CHASSIS_NO_FOLLOW:
-        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Cyan, 15, 2, 185, 550, "FREE  ");
+        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Cyan, 15, 2, 185, 600, "FREE  ");
         break;
     case CHASSIS_ROTATE:
-        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Orange, 15, 2, 185, 550, "SPIN  ");
+        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Orange, 15, 2, 185, 600, "SPIN  ");
         break;
     default:
-        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Pink, 15, 2, 185, 550, "STOP  ");
+        Char_Draw(ui_g_TEXT_HeadState, "sd6", graph_operate, 8, UI_Color_Pink, 15, 2, 185, 600, "STOP  ");
         break;
     }
 
     Line_Draw(ui_g_LINE_EnergyBar, "sd4", graph_operate, 8, UI_Color_Green, 30, 755, 97,
               (uint32_t)755 + (uint32_t)((float)ui_g_interactive_info->capEnergy / 255.0f * 410.0f), 97);
 
-    Char_Draw(ui_g_TEXT_JudgePower, "sd7", graph_operate, 8, UI_Color_Purplish_red, 18, 2, 560, 88,
-              "%.0fW", (float)ui_g_referee_info->GameRobotState.chassis_power_limit);
-    Char_Draw(ui_g_TEXT_CapPower, "sd8", graph_operate, 8, UI_Color_Green, 18, 2, 1180, 88,
-              "%.0fW", ui_g_interactive_info->supercap_now_power);
+    Char_Draw(ui_g_TEXT_JudgePower, "sd7", graph_operate, 8, UI_Color_Purplish_red, 18, 3, 600, 88,
+              "%dW", (int)(ui_g_referee_info->GameRobotState.chassis_power_limit + 0.5f));
+    Char_Draw(ui_g_TEXT_CapPower, "sd8", graph_operate, 8, UI_Color_Green, 18, 3, 1285, 88,
+              "%dW", (int)(ui_g_interactive_info->supercap_now_power +
+              (ui_g_interactive_info->supercap_now_power >= 0.0f ? 0.5f : -0.5f)));
 
-    if (offset_angle < 0.0f)
-    {
-        offset_angle += 360.0f;
-    }
-
-    start_angle = (int)(offset_angle - 90.0f);
-    end_angle = (int)(offset_angle + 90.0f);
-    if (start_angle < 0)
-    {
-        start_angle += 360;
-    }
-    if (end_angle > 360)
-    {
-        end_angle -= 360;
-    }
-
-    if (ui_g_interactive_info->chassis_mode == CHASSIS_ROTATE)
-    {
-        Arc_Draw(ui_g_ARC_ChassisYaw, "sd5", graph_operate, 8, UI_Color_Main, 0, 360, 3, 1695, 470, 40, 40);
-    }
-    else
-    {
-        Arc_Draw(ui_g_ARC_ChassisYaw, "sd5", graph_operate, 8, UI_Color_Main, (uint32_t)start_angle, (uint32_t)end_angle, 3, 1695, 470, 40, 40);
-    }
+    // if (ui_g_interactive_info->chassis_mode == CHASSIS_ROTATE)
+    // {
+    //     Arc_Draw(ui_g_ARC_ChassisYaw, "sd5", graph_operate, 8, UI_Color_Main, 0, 360, 3, 1695, 470, 40, 40);
+    // }
+    // else
+    // {
+    //     Arc_Draw(ui_g_ARC_ChassisYaw, "sd5", graph_operate, 8, UI_Color_Main, (uint32_t)start_angle, (uint32_t)end_angle, 3, 1695, 470, 40, 40);
+    // }
 }
 
 static void ui_g_submit_dirty(void)
@@ -219,7 +202,7 @@ void ui_init_g(void)
 
     while (ui_g_referee_info->GameRobotState.robot_id == 0)
     {
-        RefereeSend(NULL, 0);
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     ui_g_determine_robot_id();
