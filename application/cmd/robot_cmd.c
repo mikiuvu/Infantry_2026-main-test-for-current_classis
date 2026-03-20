@@ -601,8 +601,8 @@ static void Limitshoot()
     //     break;
     //}
     int shoot_rate = 0.009 * chassis_fetch_data.rest_heat;
-    if (shoot_rate > 10)
-        shoot_rate = 10;
+    if (shoot_rate > 25)
+        shoot_rate = 25;
     if (shoot_rate < 3)
         shoot_rate = 1.4;
     shoot_cmd_send.shoot_rate = shoot_rate;
@@ -1111,14 +1111,20 @@ static void ImageMouseKeySet()
     default: chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;            break;
     }; break;
     }
-
+        // G键视觉目标
+    switch (image_rc_data[TEMP].key_count[KEY_PRESS][Key_G] % 3)
+    {
+    case 0:  vision_work_mode = VISION_MODE_AIM;        break;
+    case 1:  vision_work_mode = VISION_MODE_SMALL_BUFF; break;
+    default: vision_work_mode = VISION_MODE_BIG_BUFF;   break;
+    }
 
 
     // 鼠标左键射击
     switch (image_rc_data[TEMP].mouse.press_l)
     {
     case 0:  shoot_cmd_send.load_mode = LOAD_STOP; break;
-    default: break;
+    default: shoot_cmd_send.load_mode = LOAD_BURSTFIRE; break;
     }
 
     // 视觉自瞄模式下自动开火
